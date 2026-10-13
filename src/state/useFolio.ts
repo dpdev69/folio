@@ -1,26 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyEvent, appendPrompt } from "../book/events";
+import { applyEvent, appendPrompt, renameBlock } from "../book/events";
 import { paginateBook, type LaidPage } from "../book/paginate";
 import { chapterRoman, displayTitle, isUntitled, type Book, type Chapter, type Plate } from "../book/model";
 import { SAMPLE_BREAKS, SAMPLE_DRAFT, sampleBook, sampleNoteReply, sampleReply } from "../book/sample";
 import { revealNextLine, type Measure } from "../book/wrap";
-import { EngineClient, PRESS_SYSTEM, type EngineAuth } from "../engine/client";
+import type { EngineClient, FormAnswer, ModelInfo, ModelRef, ProviderInfo } from "../engine/client";
 import { coalesce } from "../engine/coalesce";
+import type { EventFrame } from "../engine/sse";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, initialNav, reduceNav, type Nav } from "./nav";
 import { DEFAULT_SCALE_INDEX, SCALES, inkFont, layoutScale, proseFont } from "../ui/scales";
 import { useSettings } from "./useSettings";
-import { FIRST_PAGE, FIRST_PAGE_ID, keyProviders, modelSummary, type PressPhase } from "../welcome/copy";
+import { FIRST_PAGE, FIRST_PAGE_ID, keyProviders, pressSummary, type PressPhase } from "../welcome/copy";
+import {
+  DECLINE_MESSAGE,
+  isTauri,
+  loadBook,
+  messageOf,
+  openChapter,
+  openPress,
+  pressHost,
+  refreshBook,
+  revertPlate,
+  turnDiff,
+  type AttachTarget,
+} from "./press";
 
 export type EngineState = "off" | "connecting" | "ready" | "error";
-
-type AttachResult = { ok: true; proxyUrl: string; version?: string } | { ok: false; error: string };
-
-const ASK_RULES = ["edit", "write", "apply_patch", "bash"].map((permission) => ({
-  permission,
-  pattern: "*",
-  action: "ask" as const,
-}));
 
 export function useFolio() {
   const [book, setBook] = useState<Book | null>(null);
@@ -42,6 +48,9 @@ export function useFolio() {
   const [place, setPlace] = useState<number | null>(null);
   const [pathDraft, setPathDraft] = useState("");
   const [passwordDraft, setPasswordDraft] = useState("");
+  const [pressUrlDraft, setPressUrlDraft] = useState("");
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [model, setModel] = useState<ModelRef | null>(null);
   const [showPath, setShowPath] = useState(false);
   const [reduced, setReduced] = useState(false);
   const [fontsReady, setFontsReady] = useState(false);
@@ -49,6 +58,10 @@ export function useFolio() {
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<number | null>(null);
   const jumpRef = useRef<string | null>(null);
+  const diffTimers = useRef(new Map<string, number>());
+  const providersRef = useRef<ProviderInfo[]>([]);
+  const bookRef = useRef<Book | null>(null);
+  bookRef.current = book;
   const { settings, dispatch: setSettings, theme, appearance } = useSettings();
   const { scaleIndex, lineSpacing, margins } = settings;
   const scale = useMemo(
@@ -149,20 +162,41 @@ export function useFolio() {
     });
   }, [layout.pages, book]);
 
+  useEffect(() => {
+    const client = clientRef.current;
+    if (!book || book.sample || !client) return;
+    for (const chapter of book.chapters) {
+      if (!chapter.diffStale || diffTimers.current.has(chapter.id)) continue;
+      const timer = window.setTimeout(() => {
+        const latest = bookRef.current?.chapters.find((item) => item.id === chapter.id);
+        if (!latest) {
+          diffTimers.current.delete(chapter.id);
+          return;
+        }
+        turnDiff(client, latest)
+          // An empty diff still marks the chapter fresh, so a failure is not retried in a loop.
+          .catch(() => ({ type: "folio.diff", data: { sessionID: chapter.id, diff: [] } }))
+          .then((frame) => {
+            diffTimers.current.delete(chapter.id);
+            setBook((current) => (current && !current.sample ? applyEvent(current, frame) : current));
+          });
+      }, 300);
+      diffTimers.current.set(chapter.id, timer);
+    }
+  }, [book]);
+
   function stopStream() {
     if (streamRef.current != null) window.clearTimeout(streamRef.current);
     streamRef.current = null;
   }
 
   function openSample(spread?: number) {
+    // The press stays attached; only the book's stream stops.
     abortRef.current?.abort();
-    clientRef.current = null;
     stopStream();
     const next = sampleBook();
     setBook(next);
     setDrafts({ "ch-iv": SAMPLE_DRAFT });
-    setEngineState("off");
-    setEngineVersion(null);
     setNotice(null);
     setShowPath(false);
     setMenuOpen(false);
@@ -194,6 +228,11 @@ export function useFolio() {
   async function connect(directory: string) {
     const folder = directory.trim();
     if (!folder) return;
+    const client = clientRef.current;
+    if (!client) {
+      setNotice("The press is not ready yet. Wait for the title page to say so, then open the folder.");
+      return;
+    }
     setEngineState("connecting");
     setNotice(null);
     const license = await uncheckedLicense.check();
@@ -205,69 +244,30 @@ export function useFolio() {
     abortRef.current?.abort();
     stopStream();
     try {
-      let baseUrl = "/engine";
-      let auth: EngineAuth | undefined;
-      if (passwordDraft.trim()) auth = { username: "opencode", password: passwordDraft.trim() };
-      if (isTauri()) {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const attached = await invoke<AttachResult>("engine_attach", {
-          directory: folder,
-          password: passwordDraft.trim() || null,
-        });
-        if (!attached.ok) throw new Error(attached.error);
-        baseUrl = attached.proxyUrl;
-        auth = undefined;
-      }
-      const client = new EngineClient(baseUrl, { directory: folder, auth });
-      const health = await client.health();
-      let sessions = await client.sessions();
-      if (sessions.length === 0) {
-        const created = await client.createSession({
-          title: "Untitled",
-          permission: askBeforeWrite ? ASK_RULES : undefined,
-        });
-        sessions = [created];
-      }
-      let next = bookFromSessions(folder, sessions);
-      for (const session of sessions) {
-        const transcript = await client.messages(session.id);
-        for (const message of transcript) {
-          for (const part of message.parts ?? []) {
-            next = applyEvent(next, {
-              type: "message.part.updated",
-              properties: { sessionID: session.id, role: message.info?.role, part },
-            });
-          }
-        }
-        try {
-          const diff = await client.diff(session.id);
-          next = applyEvent(next, { type: "session.diff", properties: { sessionID: session.id, diff } });
-        } catch {
-          // Diffs are optional while a session is still empty.
-        }
-      }
+      const next = await loadBook(client, folder, { askBeforeWrite, model });
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       // Many deltas arrive per frame; set them in type together, in order.
-      const events = coalesce<Parameters<typeof applyEvent>[1]>((batch) =>
+      const events = coalesce<EventFrame>((batch) =>
         setBook((current) => {
           if (!current || current.sample) return current;
-          return batch.reduce((next, event) => applyEvent(next, event), current);
+          return batch.reduce((book, frame) => applyEvent(book, frame), current);
         }),
       );
       ctrl.signal.addEventListener("abort", () => events.cancel());
-      client.subscribe((event) => {
-        if (event.type === "folio.stream-paused") {
+      client.subscribe((frame) => {
+        if (frame.type === "folio.stream-paused") {
           setNotice("The event stream paused. Folio will listen again.");
-          return;
+        } else if (frame.type === "folio.stream-resumed") {
+          setNotice(null);
+          void resync(client, ctrl.signal);
+        } else {
+          events.push(frame);
         }
-        events.push(event);
       }, ctrl.signal);
-      clientRef.current = client;
       setBook(ensureFirstPage(next));
       setDrafts({});
       setEngineState("ready");
-      setEngineVersion(health.version);
       setShowPath(false);
       const last = next.chapters[next.chapters.length - 1];
       jumpRef.current = last?.id ?? null;
@@ -275,11 +275,24 @@ export function useFolio() {
       setNotice(null);
     } catch (error) {
       setEngineState("error");
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Folio could not reach opencode. Start it with opencode serve, or read the sample.",
-      );
+      setNotice(messageOf(error, "Folio could not open that folder with the press."));
+    }
+  }
+
+  /** The stream has no replay; after an outage, set the chapters again from history. */
+  async function resync(client: EngineClient, signal: AbortSignal) {
+    const snapshot = bookRef.current;
+    if (!snapshot || snapshot.sample) return;
+    try {
+      const fresh = await refreshBook(client, snapshot);
+      if (signal.aborted) return;
+      setBook((current) => {
+        if (!current || current.id !== fresh.id) return current;
+        const byId = new Map(fresh.chapters.map((chapter) => [chapter.id, chapter]));
+        return { ...current, chapters: current.chapters.map((chapter) => byId.get(chapter.id) ?? chapter) };
+      });
+    } catch {
+      // The next outage or turn will try again.
     }
   }
 
@@ -323,11 +336,25 @@ export function useFolio() {
       streamInto(chapter.id, replyId, full);
       return;
     }
-    updateChapter(chapter.id, (current) => appendPrompt(current, text.trim()));
-    void clientRef.current?.prompt(chapter.id, text.trim(), PRESS_SYSTEM).catch((error: unknown) => {
-      setNotice(error instanceof Error ? error.message : "The prompt was not accepted.");
-      updateChapter(chapter.id, (current) => ({ ...current, busy: false }));
-    });
+    const localId = `local-${Date.now()}`;
+    updateChapter(chapter.id, (current) => appendPrompt(current, text.trim(), localId));
+    void sendPrompt(chapter.id, text.trim(), localId, "The prompt was not accepted.");
+  }
+
+  /**
+   * Send a prompt. The press answers with the user message id; the ink line
+   * set as `local-…` takes that name (the stream usually renames it first).
+   */
+  async function sendPrompt(chapterId: string, text: string, localId: string | null, failure: string) {
+    const client = clientRef.current;
+    if (!client) return;
+    try {
+      const id = await client.prompt(chapterId, text);
+      if (localId) updateChapter(chapterId, (current) => renameBlock(current, localId, id));
+    } catch (error) {
+      setNotice(messageOf(error, failure));
+      updateChapter(chapterId, (current) => ({ ...current, busy: false }));
+    }
   }
 
   function streamInto(chapterId: string, blockId: string, full: string, marginal = false) {
@@ -369,9 +396,7 @@ export function useFolio() {
       streamInto(chapter.id, replyId, sampleNoteReply(prompt), true);
       return;
     }
-    void clientRef.current?.prompt(chapter.id, composed, PRESS_SYSTEM).catch((error: unknown) => {
-      setNotice(error instanceof Error ? error.message : "The margin note was not sent.");
-    });
+    void sendPrompt(chapter.id, composed, null, "The margin note was not sent.");
   }
 
   function turn(forward: boolean) {
@@ -400,23 +425,21 @@ export function useFolio() {
       jumpRef.current = id;
       return;
     }
+    const client = clientRef.current;
+    if (!client) return;
     try {
-      const created = await clientRef.current?.createSession({
-        title: "Untitled",
-        permission: askBeforeWrite ? ASK_RULES : undefined,
-      });
-      if (!created) return;
+      const created = await openChapter(client, book.directory, { askBeforeWrite, model });
       setBook((current) =>
         current
           ? applyEvent(current, {
               type: "session.created",
-              properties: { info: { ...created, directory: current.directory } },
+              data: { sessionID: created.id, title: created.title, location: { directory: current.directory } },
             })
           : current,
       );
       jumpRef.current = created.id;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "A new chapter could not be opened.");
+      setNotice(messageOf(error, "A new chapter could not be opened."));
     }
   }
 
@@ -436,31 +459,73 @@ export function useFolio() {
   async function rejectPlate(id: string) {
     const found = findPlate(book, id);
     if (!found) return;
-    if (!book?.sample) {
-      if (!found.plate.messageId || !clientRef.current) {
-        setNotice("This plate has no message to revert. Opencode applies edits as it goes, so Reject needs that message id.");
-        return;
-      }
+    if (book && !book.sample) {
+      const client = clientRef.current;
+      if (!client) return;
       try {
-        await clientRef.current.revert(found.chapter.id, found.plate.messageId);
+        const frame = await revertPlate(client, book, found.chapter, found.plate);
+        mutatePlate(id, (plate) => ({ ...plate, status: "reverted", folded: true }));
+        setBook((current) => (current ? applyEvent(current, frame) : current));
+        setNotice("The file was restored.");
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "The press could not revert the edit.");
-        return;
+        setNotice(messageOf(error, "The press could not undo the change."));
       }
+      return;
     }
     mutatePlate(id, (plate) => ({ ...plate, status: "reverted", folded: true }));
   }
 
-  async function answerAsk(chapterId: string, id: string, response: "once" | "always" | "reject") {
+  /** "Allow once", or "No" with a message so the turn goes on without the change. */
+  async function answerAsk(chapterId: string, id: string, decision: "once" | "reject") {
     if (book && !book.sample) {
       try {
-        await clientRef.current?.permission(chapterId, id, response);
+        await clientRef.current?.permissionReply(chapterId, id, decision, decision === "reject" ? DECLINE_MESSAGE : undefined);
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "The permission was not answered.");
+        setNotice(messageOf(error, "The question was not answered."));
         return;
       }
     }
     updateChapter(chapterId, (chapter) => ({ ...chapter, asks: chapter.asks.filter((ask) => ask.id !== id) }));
+  }
+
+  async function answerForm(chapterId: string, formId: string, answer: FormAnswer) {
+    if (book && !book.sample) {
+      try {
+        await clientRef.current?.formReply(chapterId, formId, answer);
+      } catch (error) {
+        setNotice(messageOf(error, "The answer was not sent."));
+        return;
+      }
+    }
+    updateChapter(chapterId, (chapter) => ({ ...chapter, forms: chapter.forms.filter((form) => form.id !== formId) }));
+  }
+
+  async function dismissForm(chapterId: string, formId: string) {
+    if (book && !book.sample) {
+      try {
+        await clientRef.current?.formCancel(chapterId, formId, "The reader skipped this question.");
+      } catch (error) {
+        setNotice(messageOf(error, "The question was not set aside."));
+        return;
+      }
+    }
+    updateChapter(chapterId, (chapter) => ({ ...chapter, forms: chapter.forms.filter((form) => form.id !== formId) }));
+  }
+
+  /** Use this model for the chapter in view, and for chapters opened from now on. */
+  async function chooseModel(choice: ModelRef) {
+    setModel(choice);
+    setMenuOpen(false);
+    setPress((current) =>
+      current.phase === "ready" ? { ...current, summary: pressSummary(current.version, providersRef.current, choice) } : current,
+    );
+    const chapter = chapterForSpread(nav.spread);
+    if (!chapter || !book || book.sample) return;
+    try {
+      await clientRef.current?.setSessionModel(chapter.id, choice);
+    } catch (error) {
+      setNotice(messageOf(error, "The press kept its model."));
+    }
   }
 
   function replacePassage(noteId: string) {
@@ -484,7 +549,8 @@ export function useFolio() {
     setDrafts((prev) => ({ ...prev, [id]: value }));
   }
 
-  async function preparePress() {
+  /** Find the press, start or attach to it, and say on the title page what it will write with. */
+  async function preparePress(target?: AttachTarget) {
     setPress({ phase: "checking" });
     try {
       const license = await uncheckedLicense.check();
@@ -492,115 +558,79 @@ export function useFolio() {
         setPress({ phase: "error", message: "This copy of Folio is not licensed." });
         return;
       }
-      let base = "/engine";
-      const auth = passwordDraft.trim() ? { username: "opencode", password: passwordDraft.trim() } : undefined;
-      if (isTauri()) {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const detected = await invoke<{ found: boolean }>("engine_detect");
-        if (!detected.found) {
-          setPress({ phase: "missing" });
-          return;
-        }
-        const attached = await invoke<AttachResult>("engine_attach", {
-          directory: null,
-          password: passwordDraft.trim() || null,
-        });
-        if (!attached.ok) {
-          setPress({ phase: "missing", detail: attached.error });
-          return;
-        }
-        base = attached.proxyUrl;
-      } else {
-        const probe = (await fetch("/folio/press").then((response) => response.json())) as {
-          installed: boolean;
-          running: boolean;
-        };
-        if (!probe.installed && !probe.running) {
-          setPress({ phase: "missing" });
-          return;
-        }
-        if (!probe.running) {
-          const started = (await fetch("/folio/serve", { method: "POST" }).then((response) => response.json())) as {
-            ok: boolean;
-            error?: string;
-          };
-          if (!started.ok) {
-            setPress({ phase: "missing", detail: started.error });
-            return;
-          }
-        }
-      }
-      const client = new EngineClient(base, { auth });
-      clientRef.current = client;
-      const health = await client.health();
-      const providers = await client.providers().catch(() => ({ connected: [] as string[], default: {} as Record<string, string> }));
-      setEngineState("ready");
-      setEngineVersion(health.version);
-      if (!providers.connected.length) {
-        const methods = await client.providerAuth().catch(() => ({}));
-        const list = keyProviders(methods);
-        setPress({
-          phase: "needs-provider",
-          providers: list.length ? list : [{ id: "openai", label: "OpenAI" }],
-        });
-        return;
-      }
-      setPress({
-        phase: "ready",
-        version: health.version,
-        summary: modelSummary(providers.connected, providers.default),
-      });
+      const opened = await openPress(pressHost(), target);
+      clientRef.current = opened.client;
+      providersRef.current = opened.providers;
+      setModels(opened.models);
+      setModel(opened.model);
+      setEngineState(opened.client ? "ready" : "off");
+      setEngineVersion(opened.version ?? null);
+      setPress(opened.phase);
     } catch (error) {
+      clientRef.current = null;
       setEngineState("error");
-      setPress({
-        phase: "error",
-        message: error instanceof Error ? error.message : "The press could not be reached.",
-      });
+      setPress({ phase: "error", message: messageOf(error, "The press could not be reached.") });
     }
   }
 
   async function installPress() {
     setPress({ phase: "installing" });
     try {
-      const result = isTauri()
-        ? await (async () => {
-            const { invoke } = await import("@tauri-apps/api/core");
-            return invoke<{ ok: boolean; error?: string }>("engine_install");
-          })()
-        : ((await fetch("/folio/install", { method: "POST" }).then((response) => response.json())) as {
-            ok: boolean;
-            error?: string;
-          });
+      const result = await pressHost().install();
       if (!result.ok) {
         setPress({ phase: "missing", detail: result.error ?? "The installer did not finish." });
         return;
       }
       await preparePress();
     } catch (error) {
-      setPress({ phase: "missing", detail: error instanceof Error ? error.message : "Install failed." });
+      setPress({ phase: "missing", detail: messageOf(error, "The installer did not finish.") });
     }
   }
 
+  /** Store a provider key with the press, then name the press's model again. */
   async function saveProviderKey() {
-    if (!providerKey.trim() || !clientRef.current) return;
+    const client = clientRef.current;
+    if (!providerKey.trim() || !client) return;
     setSavingKey(true);
     try {
-      await clientRef.current.setApiKey(providerId, providerKey.trim());
+      await client.connectKey(providerId, providerKey.trim(), "Folio");
       setProviderKey("");
-      await preparePress();
+      const [providers, list, fallback] = await Promise.all([
+        client.providers().catch(() => providersRef.current),
+        client.models().catch(() => [] as ModelInfo[]),
+        client.defaultModel().catch(() => null),
+      ]);
+      providersRef.current = providers;
+      setModels(list);
+      const chosen = model ?? (fallback ? { providerID: fallback.providerID, id: fallback.id } : null);
+      setPress((current) =>
+        current.phase === "ready"
+          ? { phase: "ready", version: current.version, summary: pressSummary(current.version, providers, chosen) }
+          : current,
+      );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "The key was not accepted. You can run opencode auth login instead.");
+      setNotice(messageOf(error, "The key was not accepted."));
     } finally {
       setSavingKey(false);
     }
   }
 
+  /** Open the key form on the title page. It is never required; the free provider works without one. */
   async function showProviderForm() {
-    const methods = (await clientRef.current?.providerAuth().catch(() => ({}))) ?? {};
-    const list = keyProviders(methods);
-    setPress({ phase: "needs-provider", providers: list.length ? list : [{ id: "openai", label: "OpenAI" }] });
-    setNav((current) => ({ ...current, view: "desk" }));
     setMenuOpen(false);
+    setNav((current) => ({ ...current, view: "desk" }));
+    const client = clientRef.current;
+    if (!client) {
+      setNotice("The press is not ready yet.");
+      return;
+    }
+    const list = keyProviders(await client.integrations().catch(() => []));
+    if (!list.length) {
+      setNotice("The press offers no providers that take a key.");
+      return;
+    }
+    if (!list.some((item) => item.id === providerId)) setProviderId(list[0].id);
+    setPress((current) => (current.phase === "ready" ? { ...current, providers: list } : current));
   }
 
   const activeId = chapterForSpread(nav.spread)?.id;
@@ -622,16 +652,13 @@ export function useFolio() {
       })
     : [];
 
-  const engineLabel =
-    engineState === "ready"
+  const engineLabel = book?.sample
+    ? "Sample press"
+    : engineState === "ready"
       ? `opencode ${engineVersion ?? ""}`.trim()
       : engineState === "connecting"
         ? "Looking for the press…"
-        : engineState === "error"
-          ? "opencode is not attached"
-          : book?.sample
-            ? "Sample press"
-            : "opencode is not attached";
+        : "opencode is not attached";
 
   return {
     book,
@@ -667,13 +694,21 @@ export function useFolio() {
     setPathDraft,
     passwordDraft,
     setPasswordDraft,
+    pressUrlDraft,
+    setPressUrlDraft,
+    attachPress: () => void preparePress({ url: pressUrlDraft.trim(), password: passwordDraft }),
     showPath,
     reduced,
     openSample: () => openSample(),
-    preparePress,
+    preparePress: () => void preparePress(),
+    models,
+    model,
+    chooseModel: (choice: ModelRef) => void chooseModel(choice),
     installPress,
     saveProviderKey,
     showProviderForm,
+    hideProviderForm: () =>
+      setPress((current) => (current.phase === "ready" ? { phase: "ready", version: current.version, summary: current.summary } : current)),
     press,
     providerId,
     setProviderId,
@@ -720,6 +755,8 @@ export function useFolio() {
       setNav((current) => ({ ...current, margin: false }));
     },
     answerAsk,
+    answerForm,
+    dismissForm,
     replacePassage,
     keepBoth: (noteId: string) =>
       updateChapter(chapterForSpread(nav.spread)?.id ?? "", (chapter) => ({
@@ -734,7 +771,9 @@ export function useFolio() {
     stop: () => {
       const chapter = chapterForSpread(nav.spread);
       stopStream();
-      if (chapter && book && !book.sample) void clientRef.current?.abort(chapter.id);
+      if (chapter && book && !book.sample) {
+        void clientRef.current?.interrupt(chapter.id).catch((error: unknown) => setNotice(messageOf(error, "The press did not stop.")));
+      }
       if (chapter) updateChapter(chapter.id, (current) => ({ ...current, busy: false }));
     },
     chapterRoman,
@@ -757,31 +796,6 @@ function ensureFirstPage(book: Book): Book {
   };
 }
 
-function bookFromSessions(directory: string, sessions: { id: string; title?: string; time?: { created?: number } }[]): Book {
-  const title = directory.split(/[\\/]/).filter(Boolean).pop() || "Book";
-  return {
-    id: directory,
-    title,
-    directory,
-    sample: false,
-    chapters: sessions
-      .slice()
-      .sort((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0))
-      .map((session) => ({
-        id: session.id,
-        title: isUntitled(session.title) ? "Untitled" : (session.title ?? "Untitled"),
-        untitled: isUntitled(session.title),
-        blocks: [],
-        footnotes: [],
-        plates: [],
-        notes: [],
-        asks: [],
-        forms: [],
-        busy: false,
-      })),
-  };
-}
-
 function findPlate(book: Book | null, id: string): { chapter: Chapter; plate: Plate } | null {
   if (!book) return null;
   for (const chapter of book.chapters) {
@@ -789,10 +803,6 @@ function findPlate(book: Book | null, id: string): { chapter: Chapter; plate: Pl
     if (plate) return { chapter, plate };
   }
   return null;
-}
-
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 let canvas: HTMLCanvasElement | null = null;

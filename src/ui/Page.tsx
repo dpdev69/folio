@@ -38,7 +38,7 @@ export function PageFace({
   onSubmit: (text: string) => void;
   onSelect: (quote: string) => void;
   asks: PermissionAsk[];
-  onAsk: (id: string, response: "once" | "always" | "reject") => void;
+  onAsk: (id: string, response: "once" | "reject") => void;
   busy: boolean;
   onStop: () => void;
   askBeforeWrite: boolean;
@@ -76,10 +76,6 @@ export function PageFace({
             <span>{ask.title}</span>
             <button type="button" onClick={() => onAsk(ask.id, "once")}>
               Allow once
-            </button>
-            <span className="dot">·</span>
-            <button type="button" onClick={() => onAsk(ask.id, "always")}>
-              Always
             </button>
             <span className="dot">·</span>
             <button type="button" className="quiet" onClick={() => onAsk(ask.id, "reject")}>

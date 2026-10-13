@@ -54,10 +54,14 @@ export function App() {
             pathDraft={folio.pathDraft}
             onPath={folio.setPathDraft}
             onConnect={() => void folio.connectPath()}
+            pressUrl={folio.pressUrlDraft}
+            onPressUrl={folio.setPressUrlDraft}
             passwordDraft={folio.passwordDraft}
             onPassword={folio.setPasswordDraft}
+            onAttach={folio.attachPress}
             onSample={folio.openSample}
-            onUseKey={folio.showProviderForm}
+            onUseKey={() => void folio.showProviderForm()}
+            onCloseKeys={folio.hideProviderForm}
           />
         )}
       </main>

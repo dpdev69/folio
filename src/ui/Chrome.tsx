@@ -118,6 +118,28 @@ export function Chrome({ folio }: { folio: Folio }) {
           <button type="button" className={folio.askBeforeWrite ? "on" : ""} onClick={folio.toggleAsk}>
             {folio.askBeforeWrite ? "Asking before writes" : "Ask before the press writes"}
           </button>
+          <button type="button" onClick={() => void folio.showProviderForm()}>
+            A provider key…
+          </button>
+          {folio.models.length ? (
+            <label className="menu-model">
+              <span>Model</span>
+              <select
+                value={folio.model ? `${folio.model.providerID}/${folio.model.id}` : ""}
+                onChange={(event) => {
+                  const choice = folio.models.find((m) => `${m.providerID}/${m.id}` === event.target.value);
+                  if (choice) folio.chooseModel({ providerID: choice.providerID, id: choice.id });
+                }}
+              >
+                {folio.model ? null : <option value="">The press's default</option>}
+                {folio.models.map((m) => (
+                  <option key={`${m.providerID}/${m.id}`} value={`${m.providerID}/${m.id}`}>
+                    {m.name ?? m.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
       ) : null}
       {folio.searchOpen && folio.book ? (

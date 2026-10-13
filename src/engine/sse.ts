@@ -25,21 +25,49 @@ export type EventFrame = {
   type?: string;
   data?: Record<string, unknown>;
   location?: Record<string, unknown>;
-  properties?: Record<string, unknown>;
 };
 
 /**
  * opencode 2.0 frames are `{id, created?, type, location?, data, durable?}`;
- * this keeps the type, data and location. Frames without `data` (opencode 1.x,
- * which the client still reads until it moves to 2.0) keep their properties.
+ * this keeps the type, data and location, which is all the reducer reads.
  */
 export function unwrapEvent(event: unknown): EventFrame {
   if (!isRecord(event)) return {};
   const type = typeof event.type === "string" ? event.type : undefined;
-  if (isRecord(event.data)) {
-    return isRecord(event.location) ? { type, data: event.data, location: event.location } : { type, data: event.data };
-  }
-  return { type, properties: isRecord(event.properties) ? event.properties : undefined };
+  const data = isRecord(event.data) ? event.data : undefined;
+  const frame: EventFrame = { type };
+  if (data) frame.data = data;
+  if (isRecord(event.location)) frame.location = event.location;
+  return frame;
+}
+
+/**
+ * Calls `onSilent` once `ms` pass without a `poke`. The stream pokes it on
+ * every chunk, heartbeat comments included, so only a dead stream trips it.
+ */
+export function watchdog(ms: number, onSilent: () => void): { poke: () => void; stop: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      onSilent();
+    }, ms);
+  };
+  arm();
+  return {
+    poke: arm,
+    stop: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
+/** Wait before reconnect `attempt` (1-based): 400 ms doubling to 8 s, give or take a fifth, never past 8 s. */
+export function backoffDelay(attempt: number, random: () => number = Math.random): number {
+  const base = Math.min(8000, 400 * 2 ** Math.max(0, attempt - 1));
+  return Math.min(8000, Math.round(base * (0.8 + 0.4 * random())));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
