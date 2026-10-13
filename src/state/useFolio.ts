@@ -81,20 +81,25 @@ export function useFolio() {
     [fontsReady, scale],
   );
 
-  const layout = useMemo(() => {
-    if (!book) return { pages: [] as LaidPage[], chapterStart: {} as Record<string, number> };
+  // Stable per font and scale, so wrapped lines are found again on the next layout.
+  const measures = useMemo(() => {
     const prose: Measure = (text) => measure(text, "prose");
     const ink: Measure = (text) => measure(text, "ink");
+    return { prose, ink };
+  }, [measure]);
+
+  const layout = useMemo(() => {
+    if (!book) return { pages: [] as LaidPage[], chapterStart: {} as Record<string, number> };
     return paginateBook(book.chapters, {
-      measure: prose,
-      inkMeasure: ink,
+      measure: measures.prose,
+      inkMeasure: measures.ink,
       width: scale.width,
       linesPerPage: scale.lines,
       dropLines: scale.dropLines,
       dropWidth: scale.dropWidth,
       breaks: book.sample ? SAMPLE_BREAKS : undefined,
     });
-  }, [book, measure, scale]);
+  }, [book, measures, scale]);
 
   const spreadCount = Math.max(1, Math.ceil(layout.pages.length / 2));
 
