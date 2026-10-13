@@ -122,6 +122,102 @@ describe("events", () => {
     expect(next.chapters[0].blocks[0].id).toBe("usr_1");
     expect(next.chapters[0].blocks[0].voice).toBe("ink");
   });
+
+  it("drops deltas for reasoning parts that announced themselves", () => {
+    let next = applyEvent(book(), {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_1",
+        part: { id: "r1", type: "reasoning", text: "" },
+      },
+    });
+    next = applyEvent(next, {
+      type: "message.part.delta",
+      properties: { sessionID: "ses_1", messageID: "m1", partID: "r1", field: "text", delta: "The user wants" },
+    });
+    next = applyEvent(next, {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_1",
+        part: { id: "r1", type: "reasoning", text: "The user wants a sentence." },
+      },
+    });
+    expect(next.chapters[0].blocks).toHaveLength(0);
+    next = applyEvent(next, {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_1",
+        part: { id: "p1", type: "step-start", snapshot: "abc" },
+      },
+    });
+    next = applyEvent(next, {
+      type: "message.part.delta",
+      properties: { sessionID: "ses_1", partID: "t9", field: "text", delta: "Unknown part, kept as text." },
+    });
+    expect(next.chapters[0].blocks).toHaveLength(1);
+  });
+
+  it("keeps a margin note open through the empty echo and closes it with the full reply", () => {
+    const seeded = {
+      ...book(),
+      chapters: [
+        {
+          ...book().chapters[0],
+          notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true }],
+        },
+      ],
+    };
+    // The reply block is announced empty before it streams.
+    let next = applyEvent(seeded, {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_1",
+        part: { id: "ans_1", type: "text", text: "", messageID: "m2" },
+      },
+    });
+    expect(next.chapters[0].notes[0].pending).toBe(true);
+    expect(next.chapters[0].notes[0].reply).toBeUndefined();
+    next = applyEvent(next, {
+      type: "message.part.delta",
+      properties: { sessionID: "ses_1", partID: "ans_1", field: "text", delta: "It mirrors " },
+    });
+    expect(next.chapters[0].notes[0].reply).toBe("It mirrors ");
+    expect(next.chapters[0].notes[0].pending).toBe(true);
+    next = applyEvent(next, {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_1",
+        part: { id: "ans_1", type: "text", text: "It mirrors the shape of greet." },
+      },
+    });
+    expect(next.chapters[0].notes[0].pending).toBe(false);
+    expect(next.chapters[0].notes[0].reply).toBe("It mirrors the shape of greet.");
+  });
+
+  it("does not let reasoning deltas take a pending margin note", () => {
+    const seeded = {
+      ...book(),
+      chapters: [
+        {
+          ...book().chapters[0],
+          notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true }],
+        },
+      ],
+    };
+    let next = applyEvent(seeded, {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_1",
+        part: { id: "r1", type: "reasoning", text: "" },
+      },
+    });
+    next = applyEvent(next, {
+      type: "message.part.delta",
+      properties: { sessionID: "ses_1", partID: "r1", field: "text", delta: "Thinking about the quote." },
+    });
+    expect(next.chapters[0].notes[0].reply).toBeUndefined();
+    expect(next.chapters[0].blocks).toHaveLength(0);
+  });
 });
 
 describe("quill", () => {

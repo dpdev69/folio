@@ -48,7 +48,9 @@ export function applyEvent(book: Book, event: Event): Book {
     if (info?.error?.message) chapter = { ...chapter, error: info.error.message, busy: false };
     if (info?.role === "assistant") chapter = { ...chapter, busy: true, error: undefined };
   } else if (type === "message.part.updated") {
-    chapter = applyPart(chapter, props.part ?? props, roleFrom(props, chapter, props.part ?? props));
+    const part = props.part ?? props;
+    chapter = rememberPartType(chapter, part);
+    chapter = applyPart(chapter, part, roleFrom(props, chapter, part));
   } else if (type === "message.part.delta") {
     chapter = applyDelta(chapter, props, roleFrom(props, chapter, props));
   } else if (type === "message.part.removed") {
@@ -129,6 +131,17 @@ function roleFrom(props: Record<string, unknown>, chapter: Chapter, raw: unknown
   return "assistant";
 }
 
+/** Record every part's type, so delta events can be filtered by it later. */
+function rememberPartType(chapter: Chapter, raw: unknown): Chapter {
+  if (!raw || typeof raw !== "object") return chapter;
+  const part = raw as Record<string, unknown>;
+  const id = stringOf(part.id);
+  const type = stringOf(part.type);
+  if (!id || !type) return chapter;
+  if (chapter.partTypes?.[id] === type) return chapter;
+  return { ...chapter, partTypes: { ...chapter.partTypes, [id]: type } };
+}
+
 function applyPart(chapter: Chapter, raw: unknown, role: "user" | "assistant"): Chapter {
   if (!raw || typeof raw !== "object") return chapter;
   const part = raw as Record<string, unknown>;
@@ -159,7 +172,13 @@ function upsertText(
     const prev = blocks[index];
     if (text.length < prev.text.length) return chapter;
     blocks[index] = { ...prev, text, voice: prev.marginal ? prev.voice : voice };
-    return { ...chapter, blocks, busy: true };
+    // An empty echo must not close a margin note that is still waiting for prose.
+    if (!text.trim()) return { ...chapter, blocks, busy: true };
+    const pending = prev.marginal ? chapter.notes.find((n) => n.pending) : undefined;
+    const notes = pending
+      ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: text, pending: false } : n))
+      : chapter.notes;
+    return { ...chapter, blocks, notes, busy: true };
   }
   const optimistic = blocks.findIndex((b) => b.id.startsWith("local-") && b.text.trim() === text.trim());
   if (optimistic >= 0) {
@@ -169,7 +188,7 @@ function upsertText(
   const pending = role === "assistant" ? chapter.notes.find((n) => n.pending) : undefined;
   blocks.push({ id, voice, text, marginal: Boolean(pending) });
   let notes = chapter.notes;
-  if (pending) notes = notes.map((n) => (n.id === pending.id ? { ...n, reply: text, pending: false } : n));
+  if (pending && text.trim()) notes = notes.map((n) => (n.id === pending.id ? { ...n, reply: text, pending: false } : n));
   return { ...chapter, blocks, notes, busy: true };
 }
 
@@ -178,6 +197,9 @@ function applyDelta(chapter: Chapter, props: Record<string, unknown>, role: "use
   const delta = stringOf(props.delta) ?? "";
   const field = stringOf(props.field) ?? "text";
   if (!partID || !delta || field !== "text") return chapter;
+  // Reasoning and bookkeeping parts stream deltas too; only text parts are set in type.
+  const known = chapter.partTypes?.[partID];
+  if (known && known !== "text") return chapter;
   const blocks = chapter.blocks.slice();
   const index = blocks.findIndex((b) => b.id === partID);
   if (index >= 0) {

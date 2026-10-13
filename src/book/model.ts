@@ -70,6 +70,8 @@ export type Chapter = {
   asks: PermissionAsk[];
   /** message id → role, so streamed parts know whether they are ink or prose. */
   messageRoles?: Record<string, "user" | "assistant">;
+  /** part id → part type, so deltas for reasoning and bookkeeping parts are dropped. */
+  partTypes?: Record<string, string>;
   busy: boolean;
   error?: string;
 };

@@ -14,6 +14,8 @@ export function toProse(input: string): { text: string; italics: ItalicRange[] }
   src = src.replace(/^#{1,6}\s+/gm, "");
   src = src.replace(/^\s*[-*]\s+/gm, "");
   src = src.replace(/^\s*\d+\.\s+/gm, "");
+  // Quoted passages (margin-note context) set as epigraph lines, not raw markdown.
+  src = src.replace(/^\s*>\s?/gm, "— ");
 
   const italics: ItalicRange[] = [];
   let text = "";
