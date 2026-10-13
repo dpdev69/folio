@@ -108,7 +108,7 @@ export const THEMES: Theme[] = [
       ink: "#1a1714", soft: "#4e4842", faint: "#958d83", rule: "#e7e1d6",
       terra: "#b8552f", "terra-deep": "#8f3f22", ribbon: "#b9402c", quill: "#1a3768",
       highlight: "#f4cdb8", add: "#f6ece4", plate: "#fffefb", "plate-rule": "#e7e1d6",
-      hint: "#bdb4a7", title: "#6a625a", chip: "#8b9cbc", grain: "rgba(96, 72, 40, 0.07)",
+      hint: "#bdb4a7", title: "#6a625a", chip: "#8b9cbc", grain: "rgba(96, 72, 40, 0.22)",
     },
     dark: {
       "desk-0": "#171513", "desk-1": "#100f0e", "desk-2": "#0a0909",
@@ -116,7 +116,7 @@ export const THEMES: Theme[] = [
       ink: "#ebe6dc", soft: "#b6ad9f", faint: "#807769", rule: "#3b362f",
       terra: "#e08a65", "terra-deep": "#eaa184", ribbon: "#b5462f", quill: "#a3bce6",
       highlight: "#6a3f2b", add: "#322a22", plate: "#1c1a17", "plate-rule": "#3b362f",
-      hint: "#6e665b", title: "#a59c8f", chip: "#7286aa", grain: "rgba(255, 240, 220, 0.05)",
+      hint: "#6e665b", title: "#a59c8f", chip: "#7286aa", grain: "rgba(255, 240, 220, 0.1)",
     },
   },
   {
