@@ -63,7 +63,8 @@ export function wrapParagraph(opts: {
 
   const marks = [...(opts.marks ?? [])].sort((a, b) => a.offset - b.offset);
   for (const mark of marks) {
-    let home = lines.length - 1;
+    // A mark before the first line (the drop-cap letter, leading space) hangs on the first line.
+    let home = mark.offset < (draft[0]?.start ?? 0) ? 0 : lines.length - 1;
     for (let i = 0; i < lines.length; i++) {
       const start = draft[i].start;
       const end = start + lines[i].text.length;

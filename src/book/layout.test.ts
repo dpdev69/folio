@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { committedPrefix, paginateChapter, type LaidLine, type LaidPage } from "./paginate";
 import { sampleBook, SAMPLE_BREAKS } from "./sample";
 import { revealNextLine, wrapParagraph } from "./wrap";
-import type { Chapter } from "./model";
+import type { Book, Chapter } from "./model";
+import { applyEvent } from "./events";
 
 const measure = (text: string) => text.length;
 
@@ -159,5 +160,45 @@ describe("streaming stability", () => {
     expect(noted.flatMap((p) => p.lines).some((line) => line.notes.includes(1))).toBe(true);
     const plain = paginateChapter(chapter(text), opts);
     expect(plain.flatMap((p) => p.lines).every((line) => line.notes.length === 0)).toBe(true);
+  });
+});
+
+describe("adopted footnotes", () => {
+  const opts = { measure, width: 40, linesPerPage: 6, dropLines: 3, dropWidth: 4 };
+
+  function pressed(lead: string): Chapter[] {
+    const shell: Book = { id: "b", title: "b", directory: "/b", sample: false, chapters: [chapter("")] };
+    shell.chapters[0] = { ...shell.chapters[0], blocks: [] };
+    let book = applyEvent(shell, {
+      type: "message.part.updated",
+      properties: { sessionID: "c", part: { id: "t", type: "tool", tool: "bash", state: { status: "running", input: {} } } },
+    });
+    const steps: Chapter[] = [];
+    for (let i = 0; i < 60; i++) {
+      const delta = i === 0 ? `${lead}word${i}` : ` word${i}`;
+      book = applyEvent(book, {
+        type: "message.part.delta",
+        properties: { sessionID: "c", partID: "p", field: "text", delta },
+      });
+      steps.push(book.chapters[0]);
+    }
+    return steps;
+  }
+
+  function where(chapterNow: Chapter): [number, number][] {
+    const pages = paginateChapter(chapterNow, opts);
+    return pages.flatMap((page, p) =>
+      page.lines.flatMap((line, l) => (line.notes.includes(1) ? [[p, l] as [number, number]] : [])),
+    );
+  }
+
+  it.each([
+    ["under the drop cap", ""],
+    ["after leading blank lines", "\n\n"],
+  ])("stays on the first line %s while the text grows", (_name, lead) => {
+    const steps = pressed(lead);
+    expect(steps[0].footnotes[0]).toMatchObject({ blockId: "p", offset: 0 });
+    for (const step of steps) expect(where(step)).toEqual([[0, 0]]);
+    expect(paginateChapter(steps[steps.length - 1], opts).length).toBeGreaterThan(1);
   });
 });

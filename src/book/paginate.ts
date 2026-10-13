@@ -82,9 +82,15 @@ export function paginateChapter(
         italics: shiftItalics(parsed.italics, paragraph.start, paragraph.text.length),
         measure: item.voice === "ink" ? inkMeasure : measure,
         width: opts.width,
+        // A mark belongs to the first paragraph that ends at or after it, so one that
+        // falls before the text or between paragraphs is not left to ride the tail.
         marks: item.marks
-          .filter((mark) => mark.offset >= paragraph.start && mark.offset <= paragraph.start + paragraph.text.length)
-          .map((mark) => ({ ...mark, offset: mark.offset - paragraph.start })),
+          .filter((mark) => {
+            const previous = paragraphs[paragraphIndex - 1];
+            const afterPrevious = !previous || mark.offset > previous.start + previous.text.length;
+            return afterPrevious && mark.offset <= paragraph.start + paragraph.text.length;
+          })
+          .map((mark) => ({ ...mark, offset: Math.max(0, mark.offset - paragraph.start) })),
         drop: useDrop ? { lines: opts.dropLines, width: opts.dropWidth } : undefined,
       });
       let plainStart = paragraph.start;
