@@ -32,11 +32,27 @@ Open the desktop shell with:
 npm run tauri dev
 ```
 
-Folio looks for the binary in `FOLIO_OPENCODE_BIN`, then `~/.opencode/bin/opencode`, then `PATH`. `opencode` 1.19 is the server this client was exercised against. The API moves quickly; event shapes we do not know are ignored.
+Folio looks for the binary next to its own executable (the bundled sidecar, named `opencode-cli`), then in `FOLIO_OPENCODE_BIN`, then `~/.opencode/bin/opencode`, then `PATH`. `opencode` 1.19 is the server this client was exercised against. The API moves quickly; event shapes we do not know are ignored.
 
 If the server was started with `OPENCODE_SERVER_PASSWORD`, type that password on the title page before opening a folder. The username is `opencode`.
 
 `npm run dev` followed by `?sample=1` opens the sample book (the flaky-login chapter) without a model.
+
+### Bundled press
+
+The installer carries a pinned opencode CLI so the first launch needs no download. The version lives in `package.json` under `opencode.version`. Tauri expects the sidecar at `src-tauri/binaries/opencode-cli-<target-triple>` (with `.exe` on Windows), and `npm run fetch-press` puts it there. It runs before `tauri build` on its own, and in CI. Run it once by hand before `npm run tauri dev`, because the Tauri build step checks that the file exists.
+
+```bash
+npm run fetch-press
+npm run fetch-press -- --target x86_64-apple-darwin
+npm run fetch-press -- --binary /path/to/opencode
+```
+
+- If the file is already there and reports the pinned version, nothing happens.
+- `--binary <path>` copies a binary you already have. On macOS the script also reuses `/Applications/OpenCode.app` when it reports the pinned version, so there is no 145 MB download. Pass `--download` to skip that and fetch from the network.
+- Otherwise it downloads the release archive from `opencode.ai/files/bin/<version>/`, then from the GitHub release if that fails, unpacks it, and checks `--version`. A target that cannot run on this machine is downloaded without the check.
+
+When the sidecar is missing, as in a plain dev checkout, the title page falls back to the lookup order above: `FOLIO_OPENCODE_BIN`, `~/.opencode/bin/opencode`, then `PATH`, and offers the installer.
 
 ## Book
 
@@ -60,7 +76,6 @@ npm run build
 ## What is stubbed
 
 - Signing and a real license check.
-- Bundling an opencode binary inside the installer. Folio installs or finds one on the machine instead.
 - The library shelf, dog-ears, the Previously recap, themes, and other agents.
 - Approve-first is the permission toggle, not a separate editor. Reject means revert.
 - Page curl is a 3D turn with a lifted corner, not a full cylindrical mesh.
