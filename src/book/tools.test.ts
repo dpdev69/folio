@@ -30,7 +30,7 @@ describe("footnotes", () => {
       3,
     );
     expect(note.opensPlate).toBe(true);
-    expect(note.text).toContain("See Plate 3");
+    expect(note.text).toContain("See Plate III →");
     expect(note.text).toContain("tests/fixtures/session.ts");
   });
 
@@ -41,6 +41,67 @@ describe("footnotes", () => {
       status: "completed",
     });
     expect(note.text).toBe("Read tests/fixtures/session.ts, lines 1–40.");
+  });
+});
+
+describe("footnotes for opencode 2.0 tools", () => {
+  const edit = {
+    tool: "edit",
+    input: { path: "src/greet.ts", oldString: "a", newString: "a\nb" },
+  };
+
+  it("counts an edit by its patch and points at the plate in Roman numerals", () => {
+    const note = footnoteSentence({ ...edit, status: "completed", additions: 4, deletions: 0 }, 1);
+    expect(note.text).toBe("Edited src/greet.ts, 4 lines added. See Plate I →");
+    const both = footnoteSentence({ ...edit, status: "completed", additions: 1, deletions: 2 }, 2);
+    expect(both.text).toBe("Edited src/greet.ts, 2 lines removed and 1 added. See Plate II →");
+  });
+
+  it("counts an edit from its strings when no patch has come back", () => {
+    expect(footnoteSentence({ ...edit, status: "completed" }).text).toBe("Edited src/greet.ts, 1 line added.");
+    expect(footnoteSentence({ ...edit, status: "running" }).text).toBe("Editing src/greet.ts…");
+  });
+
+  it("reads path as well as filePath", () => {
+    expect(footnoteSentence({ tool: "read", input: { path: "src/greet.ts" }, status: "completed" }).text).toBe(
+      "Read src/greet.ts.",
+    );
+    expect(
+      footnoteSentence({ tool: "grep", input: { pattern: "farewell", path: "src" }, status: "completed" }).text,
+    ).toBe("Looked for farewell in src.");
+  });
+
+  it("says declined, not failed, when the reader turned a tool down", () => {
+    expect(footnoteSentence({ ...edit, status: "error", error: "Not now.", declined: true }).text).toBe(
+      "The edit to src/greet.ts was declined.",
+    );
+    expect(
+      footnoteSentence({ tool: "shell", input: { command: "rm -rf dist" }, status: "error", declined: true }).text,
+    ).toBe("The request to run rm -rf dist was declined.");
+    expect(footnoteSentence({ ...edit, status: "error", error: "File changed on disk." }).text).toBe(
+      "The edit to src/greet.ts failed: File changed on disk.",
+    );
+  });
+
+  it("words a shell command, a question, a fetch and a search", () => {
+    expect(
+      footnoteSentence({ tool: "shell", input: { command: "npm test" }, status: "completed", output: "\n 21 passed\n" })
+        .text,
+    ).toBe("Ran npm test. 21 passed.");
+    const question = {
+      tool: "question",
+      input: { questions: [{ question: "Which language should greet() use?", header: "Greet language" }] },
+    };
+    expect(footnoteSentence({ ...question, status: "running" }).text).toBe("Waiting for an answer…");
+    expect(footnoteSentence({ ...question, status: "completed" }).text).toBe(
+      "Asked a question: Which language should greet() use?",
+    );
+    expect(footnoteSentence({ tool: "webfetch", input: { url: "https://example.com" }, status: "completed" }).text).toBe(
+      "Fetched https://example.com.",
+    );
+    expect(footnoteSentence({ tool: "websearch", input: { query: "opencode" }, status: "running" }).text).toBe(
+      "Searching the web for opencode…",
+    );
   });
 });
 

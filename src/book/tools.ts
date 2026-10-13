@@ -1,12 +1,20 @@
 /** Plain-language footnotes. Tool calls never sit in the prose. */
+import { plateLines } from "./diff";
+import { toRoman } from "./model";
 
 export type ToolLike = {
   tool: string;
+  /** opencode 1.x sent one; 2.0 does not, so wording comes from the name and input. */
   title?: string;
   input?: Record<string, unknown>;
   status?: "pending" | "running" | "completed" | "error";
   output?: string;
   error?: string;
+  /** The reader turned the call down, or interrupted it. */
+  declined?: boolean;
+  /** Line counts from the patch, when the press sent one. */
+  additions?: number;
+  deletions?: number;
   startedAt?: number;
   endedAt?: number;
 };
@@ -18,14 +26,14 @@ export function footnoteSentence(tool: ToolLike, plateNumber?: number): { text: 
   const title = tool.title?.trim();
   const time = duration(tool);
 
+  if (tool.status === "error" && tool.declined) return { text: declinedSentence(name, file, command), opensPlate: false };
+
   if (name === "bash" || name === "shell") {
     const what = title || command || "a command";
     if (tool.status === "running" || tool.status === "pending") {
       return { text: `Running ${what}…`, opensPlate: false };
     }
-    if (tool.status === "error") {
-      return { text: `${what} failed${tool.error ? `: ${clip(tool.error)}` : ""}.`, opensPlate: false };
-    }
+    if (tool.status === "error") return { text: `${what} failed${reason(tool.error)}.`, opensPlate: false };
     const detail = summarizeOutput(tool.output);
     return {
       text: `Ran ${what}${detail ? `. ${detail}` : ""}${time}.`,
@@ -48,24 +56,80 @@ export function footnoteSentence(tool: ToolLike, plateNumber?: number): { text: 
   }
 
   if (isEdit(name)) {
-    const removed = countLines(firstString(tool.input, ["oldString", "old_string"]));
-    const added = countLines(firstString(tool.input, ["newString", "new_string", "content"]));
-    const counts =
-      removed || added
-        ? `, ${removed} ${removed === 1 ? "line" : "lines"} removed and ${added} added`
-        : "";
-    const plate = plateNumber ? ` See Plate ${plateNumber} →` : "";
     const which = file ?? title ?? "a file";
+    if (tool.status === "error") return { text: `The edit to ${which} failed${reason(tool.error)}.`, opensPlate: false };
     if (tool.status === "running" || tool.status === "pending") {
       return { text: `Editing ${which}…`, opensPlate: true };
     }
-    return { text: `Edited ${which}${counts}.${plate}`, opensPlate: true };
+    const plate = plateNumber ? ` See Plate ${toRoman(plateNumber)} →` : "";
+    return { text: `Edited ${which}${editCounts(tool)}.${plate}`, opensPlate: true };
+  }
+
+  if (name === "question") {
+    const questions = Array.isArray(tool.input?.questions) ? (tool.input.questions as unknown[]) : [];
+    if (tool.status === "running" || tool.status === "pending") return { text: "Waiting for an answer…", opensPlate: false };
+    if (questions.length > 1) return { text: `Asked ${questions.length} questions.`, opensPlate: false };
+    const first = questions[0] && typeof questions[0] === "object" ? (questions[0] as Record<string, unknown>) : {};
+    const asked = firstString(first, ["question", "header"]);
+    return { text: asked ? `Asked a question: ${sentence(asked)}` : "Asked a question.", opensPlate: false };
+  }
+
+  if (name === "webfetch") {
+    const url = firstString(tool.input, ["url"]) ?? "a page";
+    if (tool.status === "running" || tool.status === "pending") return { text: `Fetching ${url}…`, opensPlate: false };
+    if (tool.status === "error") return { text: `Could not fetch ${url}${reason(tool.error)}.`, opensPlate: false };
+    return { text: `Fetched ${url}.`, opensPlate: false };
+  }
+
+  if (name === "websearch") {
+    const query = firstString(tool.input, ["query"]) ?? "an answer";
+    if (tool.status === "running" || tool.status === "pending") {
+      return { text: `Searching the web for ${query}…`, opensPlate: false };
+    }
+    return { text: `Searched the web for ${query}.`, opensPlate: false };
   }
 
   const label = title || tool.tool;
   if (tool.status === "error") return { text: `${label} failed.`, opensPlate: false };
   if (tool.status === "running" || tool.status === "pending") return { text: `${label}…`, opensPlate: false };
   return { text: `${label}.`, opensPlate: false };
+}
+
+function declinedSentence(name: string, file: string | undefined, command: string | undefined): string {
+  if (isEdit(name)) return `The edit to ${file ?? "a file"} was declined.`;
+  if (name === "bash" || name === "shell") return `The request to run ${command ?? "a command"} was declined.`;
+  if (name === "read") return `The request to read ${file ?? "a file"} was declined.`;
+  if (name === "question") return "The question was set aside.";
+  return `The ${name} call was declined.`;
+}
+
+/** "4 lines added", "2 lines removed and 1 added", from the patch counts or the edit's own strings. */
+function editCounts(tool: ToolLike): string {
+  let added = tool.additions;
+  let removed = tool.deletions;
+  if (added == null || removed == null) {
+    const before = firstString(tool.input, ["oldString", "old_string"]) ?? "";
+    const after = firstString(tool.input, ["newString", "new_string", "content"]) ?? "";
+    const lines = before || after ? plateLines(before, after, { context: 0, maxLines: Infinity }) : [];
+    added = lines.filter((line) => line.kind === "add").length;
+    removed = lines.filter((line) => line.kind === "del").length;
+  }
+  const lines = (n: number) => `${n} ${n === 1 ? "line" : "lines"}`;
+  if (added && removed) return `, ${lines(removed)} removed and ${added} added`;
+  if (added) return `, ${lines(added)} added`;
+  if (removed) return `, ${lines(removed)} removed`;
+  return "";
+}
+
+/** ": the reason", without a doubled full stop. */
+function reason(error: string | undefined): string {
+  const text = error ? clip(error).replace(/[.\s]+$/, "") : "";
+  return text ? `: ${text}` : "";
+}
+
+/** End with a full stop unless the text already ends a sentence. */
+function sentence(text: string): string {
+  return /[.?!…]$/.test(text) ? text : `${text}.`;
 }
 
 function isEdit(name: string): boolean {
@@ -96,11 +160,6 @@ function numberAt(input: Record<string, unknown>, keys: string[]): number | unde
     if (typeof value === "number" && Number.isFinite(value)) return value;
   }
   return undefined;
-}
-
-function countLines(text: string | undefined): number {
-  if (!text) return 0;
-  return text.split("\n").filter((line) => line.length > 0).length;
 }
 
 function duration(tool: ToolLike): string {

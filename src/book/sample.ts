@@ -30,7 +30,7 @@ export function sampleBook(): Book {
         voice: "prose",
         text: [
           "The test failed only on the build server, and only on some mornings. That was the clue. Locally the clock is real; in CI it is mocked, and the mock was installed *after* the session token had already been minted, so every token was born a few milliseconds in the past.",
-          "I moved the clock into the fixture, so time is frozen before anything is created, and ran the suite forty times in a row. It passed every time. The change is three lines; you'll find it set out as Plate 3 at the end of this chapter.",
+          "I moved the clock into the fixture, so time is frozen before anything is created, and ran the suite forty times in a row. It passed every time. The change is three lines; you'll find it set out as Plate III at the end of this chapter.",
           "There is one loose thread. The refresh logic in *auth/refresh* retries with a backoff that can stretch to thirty seconds, which would quietly hide the same class of bug again. I'd tighten it next, if you agree.",
           "Shall I cap the backoff at two seconds and add a small circuit breaker, or would you rather keep the current window and simply log when it is reached?",
         ].join("\n\n"),
@@ -73,7 +73,7 @@ export function sampleBook(): Book {
         n: 3,
         blockId: "iv-tools",
         offset: 360,
-        text: "Edited the same file, two lines removed and three added. See Plate 3 →",
+        text: "Edited the same file, two lines removed and three added. See Plate III →",
         plateId: "plate-3",
       },
       {
