@@ -84,7 +84,7 @@ function reduceChapter(chapter: Chapter, type: string, data: Data): Chapter {
     case "form.cancelled":
       return chapter.forms.some((f) => f.id === id) ? { ...chapter, forms: chapter.forms.filter((f) => f.id !== id) } : chapter;
     case "folio.diff":
-      return applyDiff(chapter, data.diff, lastInkId(chapter));
+      return rewordPlates(applyDiff(chapter, data.diff, lastInkId(chapter)));
     default:
       return chapter;
   }
@@ -162,19 +162,37 @@ function settle(chapter: Chapter): Chapter {
 }
 
 /**
- * The prompt reached the press. The quill already set it in ink as `local-…`,
- * renamed to the user message id once the prompt call returns, so only a
- * prompt Folio did not write (another client, a queued line) is added here.
+ * The prompt reached the press. `inboxID` is the user message id (the same id
+ * the prompt call returns and history uses). The quill's optimistic `local-…`
+ * line with the same words is adopted under it, oldest first, each one once;
+ * a prompt Folio did not write (another client, a queued line) is added.
  */
 function enqueue(chapter: Chapter, inboxID: string | undefined, item: Data | undefined): Chapter {
   if (!inboxID || stringOf(item?.type) !== "user") return chapter;
   const text = stringOf(recordOf(item?.payload)?.text) ?? "";
-  if (!text.trim()) return chapter;
-  const known = chapter.blocks.some(
-    (b) => b.id === inboxID || (b.voice === "ink" && b.id.startsWith("local-") && b.text.trim() === text.trim()),
-  );
-  if (known) return chapter;
+  if (!text.trim() || chapter.blocks.some((b) => b.id === inboxID)) return chapter;
+  const local = chapter.blocks.find((b) => b.voice === "ink" && b.id.startsWith("local-") && b.text.trim() === text.trim());
+  if (local) return renameBlock(chapter, local.id, inboxID);
   return { ...chapter, blocks: [...chapter.blocks, { id: inboxID, voice: "ink", text }] };
+}
+
+/**
+ * Give a block a new id, and correct everything that names it: footnote
+ * anchors, the turns it began, and the plates of those turns. The hook calls
+ * this when the prompt call returns the user message id for a `local-…` line.
+ */
+export function renameBlock(chapter: Chapter, from: string, to: string): Chapter {
+  if (from === to || !chapter.blocks.some((b) => b.id === from)) return chapter;
+  const turns = chapter.turns
+    ? Object.fromEntries(Object.entries(chapter.turns).map(([aid, turn]) => [aid, turn === from ? to : turn]))
+    : chapter.turns;
+  return {
+    ...chapter,
+    blocks: chapter.blocks.map((b) => (b.id === from ? { ...b, id: to } : b)),
+    footnotes: chapter.footnotes.map((f) => (f.blockId === from ? { ...f, blockId: to } : f)),
+    plates: chapter.plates.map((p) => (p.turnMessageId === from ? { ...p, turnMessageId: to } : p)),
+    turns,
+  };
 }
 
 /** A model step began: remember which prompt it answers, and drop a retry notice. */
@@ -294,6 +312,28 @@ function placeTool(
   if (existing >= 0) footnotes[existing] = note;
   else footnotes.push(note);
   return { ...chapter, footnotes, plates };
+}
+
+/** A plate the session diff reset keeps a footnote that tells the same counts. */
+function rewordPlates(chapter: Chapter): Chapter {
+  let changed = false;
+  const footnotes = chapter.footnotes.map((note) => {
+    const call = chapter.calls?.[note.id];
+    const plate = note.plateId ? chapter.plates.find((p) => p.id === note.plateId) : undefined;
+    if (!call || !plate || note.pending) return note;
+    const like: ToolLike = {
+      tool: call.name,
+      input: call.input,
+      status: "completed",
+      additions: plate.additions,
+      deletions: plate.deletions,
+    };
+    const text = footnoteSentence(like, plate.n).text;
+    if (text === note.text) return note;
+    changed = true;
+    return { ...note, text };
+  });
+  return changed ? { ...chapter, footnotes } : chapter;
 }
 
 function addAsk(chapter: Chapter, data: Data): Chapter {

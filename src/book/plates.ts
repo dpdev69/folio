@@ -67,8 +67,14 @@ export function dropPlate(plates: Plate[], id: string): Plate[] {
 }
 
 /**
- * Set plates from the session diff (`GET /api/session/{id}/diff`), one per
- * file. A file that already has a plate keeps its number, status and fold.
+ * Set plates from the session diff for the current turn, one per file.
+ *
+ * The hook fetches `GET /api/session/{id}/diff?from=<turnMessageId>`, where
+ * `turnMessageId` is the user message id that began the current turn, so each
+ * patch covers that turn only (without `from` the diff is cumulative for the
+ * whole session). A patch updates the latest plate for its file in that turn,
+ * keeping its number, status and fold; a file with no plate in the turn gets a
+ * `diff-<file>` plate of its own. Plates of earlier turns are left alone.
  */
 export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string | undefined): Chapter {
   if (!Array.isArray(raw)) return chapter;
@@ -76,15 +82,16 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
   for (const item of raw) {
     const diff = fileDiffOf(item);
     if (!diff) continue;
-    const id = `diff-${diff.file}`;
     const lines = diff.patch ? parsePatch(diff.patch) : [];
-    const existing = plates.find((p) => p.id === id) ?? plates.filter((p) => p.file === diff.file).pop();
+    const existing = plates.filter((p) => p.file === diff.file && p.turnMessageId === turnMessageId).pop();
     if (!existing && !lines.length) continue;
+    const free = `diff-${diff.file}`;
+    const id = existing?.id ?? (plates.some((p) => p.id === free) ? `${free}-${turnMessageId}` : free);
     const plate: Plate = {
-      id: existing?.id ?? id,
+      id,
       n: existing?.n ?? plates.length + 1,
       messageId: existing?.messageId,
-      turnMessageId: existing ? existing.turnMessageId : turnMessageId,
+      turnMessageId,
       file: diff.file,
       title: existing?.title ?? basename(diff.file),
       caption: captionFor(diff.status, diff.file),

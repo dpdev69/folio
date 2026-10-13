@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEvent, appendPrompt, type Frame } from "./events";
+import { applyEvent, appendPrompt, renameBlock, type Frame } from "./events";
 import { parsePatch } from "./diff";
 import { quillKey } from "./quill";
 import type { Book, Chapter } from "./model";
@@ -173,6 +173,78 @@ describe("the edit capture (fixture-edit.sse)", () => {
   });
 });
 
+describe("the session diff (folio.diff)", () => {
+  const patch = (lines: string[]) =>
+    ["--- a/src/greet.ts", "+++ b/src/greet.ts", `@@ -1,1 +1,${lines.length + 1} @@`, " export {};", ...lines.map((l) => `+${l}`), ""].join("\n");
+
+  /** The edit capture, then a second turn that edits src/greet.ts again, once or twice. */
+  function secondTurn(edits: number): Book {
+    let next = play(shelf(), frames(captures.edit));
+    const sessionID = next.chapters[0].id;
+    const at = (type: string, fields: Record<string, unknown>): Frame => ({
+      type,
+      data: { sessionID, assistantMessageID: "msg_a2", ...fields },
+    });
+    next = play(next, [
+      at("session.inbox.enqueued", { inboxID: "msg_u2", item: { type: "user", payload: { text: "And a wave." } } }),
+      at("session.step.started", {}),
+    ]);
+    for (let i = 1; i <= edits; i++) {
+      next = play(next, [
+        at("session.tool.input.started", { id: `call-w${i}`, name: "edit" }),
+        at("session.tool.called", { id: `call-w${i}`, input: { path: "src/greet.ts", oldString: "x", newString: "x\ny" } }),
+        at("session.tool.success", {
+          id: `call-w${i}`,
+          content: [{ type: "text", text: "Edited" }],
+          metadata: { files: [{ file: "src/greet.ts", patch: patch([`wave${i}`]), status: "modified", additions: 1, deletions: 0 }] },
+        }),
+      ]);
+    }
+    return next;
+  }
+
+  function diffed(start: Book, lines: string[]): Chapter {
+    const diff = [{ file: "src/greet.ts", patch: patch(lines), status: "modified", additions: lines.length, deletions: 0 }];
+    return only(applyEvent(start, { type: "folio.diff", data: { sessionID: start.chapters[0].id, diff } }));
+  }
+
+  it("sets the turn's diff on that turn's plate and leaves the earlier turn's plate alone", () => {
+    const before = secondTurn(1);
+    const chapter = diffed(before, ["wave1"]);
+    expect(chapter.plates).toHaveLength(2);
+    expect(chapter.plates[0]).toEqual(before.chapters[0].plates[0]);
+    expect(chapter.plates[1]).toMatchObject({ id: "plate-call-w1", turnMessageId: "msg_u2", additions: 1 });
+  });
+
+  it("re-words the footnote of a plate the diff widened, so the two agree", () => {
+    const chapter = diffed(secondTurn(2), ["wave1", "wave2"]);
+    expect(chapter.plates.map((p) => [p.id, p.additions])).toEqual([
+      ["plate-call-816f41ab-c832-4c99-90c1-7a0d47056457", 4],
+      ["plate-call-w1", 1],
+      ["plate-call-w2", 2],
+    ]);
+    expect(chapter.footnotes.find((f) => f.id === "call-w2")?.text).toBe("Edited src/greet.ts, 2 lines added. See Plate III →");
+    expect(chapter.footnotes.find((f) => f.id === "call-w1")?.text).toBe("Edited src/greet.ts, 1 line added. See Plate II →");
+  });
+
+  it("opens a plate of its own when the current turn has none for the file", () => {
+    let start = secondTurn(0);
+    const chapter = diffed(start, ["wave"]);
+    expect(chapter.plates[0]).toEqual(start.chapters[0].plates[0]);
+    expect(chapter.plates[1]).toMatchObject({ id: "diff-src/greet.ts", n: 2, turnMessageId: "msg_u2", additions: 1 });
+    // A later turn's plate for the same file gets an id of its own.
+    start = play({ ...start, chapters: [chapter] }, [
+      { type: "session.inbox.enqueued", data: { sessionID: chapter.id, inboxID: "msg_u3", item: { type: "user", payload: { text: "More." } } } },
+    ]);
+    const third = diffed(start, ["more"]);
+    expect(third.plates.map((p) => [p.id, p.turnMessageId])).toEqual([
+      ["plate-call-816f41ab-c832-4c99-90c1-7a0d47056457", "msg_1378318cd0011en9zAGWcvx4bC"],
+      ["diff-src/greet.ts", "msg_u2"],
+      ["diff-src/greet.ts-msg_u3", "msg_u3"],
+    ]);
+  });
+});
+
 describe("the ask capture (fixture-ask.sse)", () => {
   const list = frames(captures.ask);
 
@@ -323,25 +395,46 @@ describe("events", () => {
     expect(next.chapters[0].blocks[0]).toEqual({ id: "m1:t0", voice: "prose", text: "The whole sentence.", marginal: false });
   });
 
-  it("keeps the optimistic quill line when the prompt is enqueued, and names the turn after it", () => {
+  it("adopts the optimistic quill line under the user message id, so the turn is named by it", () => {
     const seeded = { ...book(), chapters: [appendPrompt(book().chapters[0], "Cap it at two seconds.", "local-1")] };
     let next = applyEvent(
       seeded,
       ev("session.inbox.enqueued", { inboxID: "msg_u1", item: { type: "user", payload: { text: "Cap it at two seconds.\n" } } }),
     );
-    expect(next.chapters[0].blocks).toEqual([{ id: "local-1", voice: "ink", text: "Cap it at two seconds." }]);
+    expect(next.chapters[0].blocks).toEqual([{ id: "msg_u1", voice: "ink", text: "Cap it at two seconds." }]);
     next = applyEvent(next, ev("session.step.started", { assistantMessageID: "msg_a1" }));
-    expect(next.chapters[0].turns).toEqual({ msg_a1: "local-1" });
+    expect(next.chapters[0].turns).toEqual({ msg_a1: "msg_u1" });
   });
 
-  it("adds a prompt it has not seen, but not one already set under its message id", () => {
-    const seeded = { ...book(), chapters: [appendPrompt(book().chapters[0], "Cap it at two seconds.", "msg_u1")] };
+  it("adopts each optimistic line once, oldest first, so a repeated prompt is not swallowed", () => {
+    let chapter = appendPrompt(book().chapters[0], "Yes.", "local-1");
+    chapter = appendPrompt(chapter, "Yes.", "local-2");
     const enqueued = (inboxID: string) =>
-      ev("session.inbox.enqueued", { inboxID, item: { type: "user", payload: { text: "Cap it at two seconds." } } });
-    expect(applyEvent(seeded, enqueued("msg_u1"))).toBe(seeded);
-    // The same words asked again later are a new prompt.
-    const next = applyEvent(seeded, enqueued("msg_u2"));
+      ev("session.inbox.enqueued", { inboxID, item: { type: "user", payload: { text: "Yes." } } });
+    let next = applyEvent({ ...book(), chapters: [chapter] }, enqueued("msg_u1"));
+    expect(applyEvent(next, enqueued("msg_u1"))).toBe(next);
+    next = applyEvent(next, enqueued("msg_u2"));
     expect(next.chapters[0].blocks.map((b) => b.id)).toEqual(["msg_u1", "msg_u2"]);
+    next = applyEvent(next, enqueued("msg_u3"));
+    expect(next.chapters[0].blocks.map((b) => b.id)).toEqual(["msg_u1", "msg_u2", "msg_u3"]);
+  });
+
+  it("renames a block late and corrects the turn, the plate and the footnotes that name it", () => {
+    let next = { ...book(), chapters: [appendPrompt(book().chapters[0], "Edit a.", "local-1")] };
+    next = play(next, [
+      ev("session.step.started", { assistantMessageID: "msg_a1" }),
+      ev("session.tool.input.started", { assistantMessageID: "msg_a1", id: "call-1", name: "edit" }),
+      ev("session.tool.called", { assistantMessageID: "msg_a1", id: "call-1", input: { path: "a.ts", oldString: "a", newString: "a\nb" } }),
+    ]);
+    expect(next.chapters[0].turns).toEqual({ msg_a1: "local-1" });
+    expect(next.chapters[0].plates[0].turnMessageId).toBe("local-1");
+    expect(next.chapters[0].footnotes[0].blockId).toBe("local-1");
+    const renamed = renameBlock(next.chapters[0], "local-1", "msg_u1");
+    expect(renamed.blocks.map((b) => b.id)).toEqual(["msg_u1"]);
+    expect(renamed.turns).toEqual({ msg_a1: "msg_u1" });
+    expect(renamed.plates[0].turnMessageId).toBe("msg_u1");
+    expect(renamed.footnotes[0].blockId).toBe("msg_u1");
+    expect(renameBlock(renamed, "local-1", "msg_u1")).toBe(renamed);
   });
 
   it("asks in plain words for shell and wildcard permissions", () => {
