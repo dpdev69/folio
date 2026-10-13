@@ -1,0 +1,16 @@
+Folio
+Copyright (c) 2026 Folio
+
+All rights reserved.
+
+This repository is the source of a commercial, closed-source application.
+It is not offered under an open-source license. You may not redistribute the
+Folio application or its source except under a separate written agreement.
+
+A future release will check a license before the press starts. The seam for
+that check is `src/license/check.ts` (`uncheckedLicense` / `licenseBlocks`)
+and the Tauri command `license_check`. This edition always reports
+`unchecked` and does not block.
+
+opencode, which Folio runs as a sidecar, is MIT licensed. Its notice is in
+THIRD_PARTY_NOTICES.md and must stay with any copy of that program.
