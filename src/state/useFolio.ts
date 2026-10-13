@@ -8,7 +8,8 @@ import { EngineClient, PRESS_SYSTEM, type EngineAuth } from "../engine/client";
 import { coalesce } from "../engine/coalesce";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, initialNav, reduceNav, type Nav } from "./nav";
-import { DEFAULT_SCALE_INDEX, SCALES, inkFont, proseFont } from "../ui/scales";
+import { DEFAULT_SCALE_INDEX, SCALES, inkFont, layoutScale, proseFont } from "../ui/scales";
+import { useSettings } from "./useSettings";
 import { FIRST_PAGE, FIRST_PAGE_ID, keyProviders, modelSummary, type PressPhase } from "../welcome/copy";
 
 export type EngineState = "off" | "connecting" | "ready" | "error";
@@ -31,7 +32,6 @@ export function useFolio() {
   const [savingKey, setSavingKey] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [selection, setSelection] = useState<string | null>(null);
-  const [scaleIndex, setScaleIndex] = useState(DEFAULT_SCALE_INDEX);
   const [askBeforeWrite, setAskBeforeWrite] = useState(false);
   const [engineState, setEngineState] = useState<EngineState>("off");
   const [engineVersion, setEngineVersion] = useState<string | null>(null);
@@ -49,7 +49,27 @@ export function useFolio() {
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<number | null>(null);
   const jumpRef = useRef<string | null>(null);
-  const scale = SCALES[scaleIndex] ?? SCALES[DEFAULT_SCALE_INDEX];
+  const { settings, dispatch: setSettings, theme, appearance } = useSettings();
+  const { scaleIndex, lineSpacing, margins } = settings;
+  const scale = useMemo(
+    () => layoutScale(SCALES[scaleIndex] ?? SCALES[DEFAULT_SCALE_INDEX], { lineSpacing, margins }, theme),
+    [scaleIndex, lineSpacing, margins, theme],
+  );
+  const [faceEpoch, setFaceEpoch] = useState(0);
+
+  useEffect(() => {
+    // A weight or face the page has not used yet is not loaded; fetch it, then measure again.
+    let live = true;
+    document.fonts
+      .load(proseFont(scale, theme))
+      .then(() => live && setFaceEpoch((n) => n + 1))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+    // The font string only changes with the theme; size steps share the loaded face.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -75,10 +95,12 @@ export function useFolio() {
       const canvas = measureCanvas();
       const ctx = canvas.getContext("2d");
       if (!ctx) return text.length * 8;
-      ctx.font = voice === "ink" ? inkFont(scale) : proseFont(scale);
+      ctx.font = voice === "ink" ? inkFont(scale) : proseFont(scale, theme);
       return ctx.measureText(text).width;
     },
-    [fontsReady, scale],
+    // faceEpoch re-creates the measurer once a newly chosen face has loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fontsReady, scale, theme, faceEpoch],
   );
 
   // Stable per font and scale, so wrapped lines are found again on the next layout.
@@ -623,7 +645,10 @@ export function useFolio() {
     selection,
     scaleIndex,
     scale,
-    cycleScale: () => setScaleIndex((index) => (index + 1) % SCALES.length),
+    settings,
+    setSettings,
+    theme,
+    appearance,
     askBeforeWrite,
     toggleAsk: () => setAskBeforeWrite((value) => !value),
     engineState,

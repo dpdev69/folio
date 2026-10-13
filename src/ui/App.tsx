@@ -12,10 +12,11 @@ export function App() {
     ["--fs" as string]: `${folio.scale.fontSize}px`,
     ["--lh" as string]: `${folio.scale.lineHeight}px`,
     ["--drop-w" as string]: `${folio.scale.dropWidth}px`,
+    ["--margin-x" as string]: `${folio.scale.marginX}px`,
   };
 
   return (
-    <div className={`desk ${folio.reduced ? "reduced" : ""}`} style={style}>
+    <div className={`desk ${folio.reduced ? "reduced" : ""} ${folio.settings.justify ? "" : "ragged"}`} style={style}>
       <Chrome folio={folio} />
       {folio.notice ? (
         <p className="banner">

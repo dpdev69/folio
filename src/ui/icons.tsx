@@ -59,3 +59,56 @@ export function Ornament() {
     </svg>
   );
 }
+
+export function IconSun({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.6" />
+      <path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4 18 18M6 18l1.6-1.6M16.4 7.6 18 6" />
+    </svg>
+  );
+}
+
+export function IconMoon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M17.5 15.2A7 7 0 0 1 9.3 5a7 7 0 1 0 8.2 10.2Z" />
+      <path d="M17 4.5v3M15.5 6h3" />
+    </svg>
+  );
+}
+
+export function IconAuto({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="7" />
+      <path className="filled" d="M12 5a7 7 0 0 1 0 14Z" />
+    </svg>
+  );
+}
+
+export function IconGear({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="2.8" />
+      <path d="M12 3.8v2.4M12 17.8v2.4M3.8 12h2.4M17.8 12h2.4M6.2 6.2l1.7 1.7M16.1 16.1l1.7 1.7M6.2 17.8l1.7-1.7M16.1 7.9l1.7-1.7" />
+      <circle cx="12" cy="12" r="5.6" />
+    </svg>
+  );
+}
+
+export function IconCheck({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6 12.5 4 4 8-9" />
+    </svg>
+  );
+}
+
+export function IconBack({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m14.5 6-6 6 6 6" />
+    </svg>
+  );
+}

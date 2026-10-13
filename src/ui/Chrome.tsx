@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { displayTitle, toRoman } from "../book/model";
 import { IconBook, IconContents, IconMenu, IconRibbon, IconSearch, IconType } from "./icons";
+import { SettingsPopover } from "./Settings";
 import type { useFolio } from "../state/useFolio";
 
 type Folio = ReturnType<typeof useFolio>;
 
 export function Chrome({ folio }: { folio: Folio }) {
   const [tauri, setTauri] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const typeButton = useRef<HTMLButtonElement>(null);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
   useEffect(() => {
     setTauri("__TAURI_INTERNALS__" in window);
   }, []);
@@ -60,9 +64,28 @@ export function Chrome({ folio }: { folio: Folio }) {
         {chapter && folio.nav.view === "reading" ? <span className="sr"> {displayTitle(chapter)}</span> : null}
       </div>
       <div className="chrome-right">
-        <button type="button" className="icon-btn" aria-label="Type size" onClick={folio.cycleScale}>
-          <IconType />
-        </button>
+        <span className="settings-anchor">
+          <button
+            type="button"
+            ref={typeButton}
+            className={`icon-btn ${settingsOpen ? "active" : ""}`}
+            aria-label="Themes & Settings"
+            aria-haspopup="dialog"
+            aria-expanded={settingsOpen}
+            onClick={() => setSettingsOpen((open) => !open)}
+          >
+            <IconType />
+          </button>
+          {settingsOpen ? (
+            <SettingsPopover
+              settings={folio.settings}
+              dispatch={folio.setSettings}
+              appearance={folio.appearance}
+              anchor={typeButton}
+              onClose={closeSettings}
+            />
+          ) : null}
+        </span>
         <button type="button" className="icon-btn" aria-label="Search" onClick={() => folio.setSearchOpen(!folio.searchOpen)}>
           <IconSearch />
         </button>
