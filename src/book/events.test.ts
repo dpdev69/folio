@@ -275,3 +275,44 @@ describe("page turns", () => {
     expect(step.nav.spread).toBe(1);
   });
 });
+
+describe("footnote anchors", () => {
+  function tool(status: string) {
+    return {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_1",
+        part: { id: "tool1", type: "tool", tool: "bash", state: { status, input: { command: "npm test" } } },
+      },
+    };
+  }
+  function delta(partID: string, text: string) {
+    return {
+      type: "message.part.delta",
+      properties: { sessionID: "ses_1", partID, field: "text", delta: text },
+    };
+  }
+
+  it("anchors at the last finished sentence and stays there while the text grows", () => {
+    let next = applyEvent(book(), delta("p1", "I reordered the setup. Then I ra"));
+    next = applyEvent(next, tool("running"));
+    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "p1", offset: "I reordered the setup.".length });
+    next = applyEvent(next, delta("p1", "n the suite again. It passed."));
+    next = applyEvent(next, tool("completed"));
+    expect(next.chapters[0].footnotes[0]).toMatchObject({
+      blockId: "p1",
+      offset: "I reordered the setup.".length,
+      pending: false,
+    });
+  });
+
+  it("holds a tool that comes before any text until the next text part adopts it", () => {
+    let next = applyEvent(book(), tool("running"));
+    expect(next.chapters[0].footnotes[0].blockId).toBe("pending");
+    next = applyEvent(next, delta("p2", "The suite ran clean."));
+    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "p2", offset: 0 });
+    next = applyEvent(next, delta("p2", " Twice."));
+    next = applyEvent(next, tool("completed"));
+    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "p2", offset: 0 });
+  });
+});

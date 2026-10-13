@@ -178,7 +178,8 @@ function upsertText(
     const notes = pending
       ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: text, pending: false } : n))
       : chapter.notes;
-    return { ...chapter, blocks, notes, busy: true };
+    const footnotes = prev.marginal ? chapter.footnotes : adoptPending(chapter.footnotes, id, text);
+    return { ...chapter, blocks, notes, footnotes, busy: true };
   }
   const optimistic = blocks.findIndex((b) => b.id.startsWith("local-") && b.text.trim() === text.trim());
   if (optimistic >= 0) {
@@ -189,7 +190,8 @@ function upsertText(
   blocks.push({ id, voice, text, marginal: Boolean(pending) });
   let notes = chapter.notes;
   if (pending && text.trim()) notes = notes.map((n) => (n.id === pending.id ? { ...n, reply: text, pending: false } : n));
-  return { ...chapter, blocks, notes, busy: true };
+  const footnotes = pending ? chapter.footnotes : adoptPending(chapter.footnotes, id, text);
+  return { ...chapter, blocks, notes, footnotes, busy: true };
 }
 
 function applyDelta(chapter: Chapter, props: Record<string, unknown>, role: "user" | "assistant"): Chapter {
@@ -210,7 +212,8 @@ function applyDelta(chapter: Chapter, props: Record<string, unknown>, role: "use
     const notes = pending
       ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: text } : n))
       : chapter.notes;
-    return { ...chapter, blocks, notes, busy: true };
+    const footnotes = prev.marginal ? chapter.footnotes : adoptPending(chapter.footnotes, partID, text);
+    return { ...chapter, blocks, notes, footnotes, busy: true };
   }
   const pending = role === "assistant" ? chapter.notes.find((n) => n.pending) : undefined;
   blocks.push({
@@ -222,7 +225,8 @@ function applyDelta(chapter: Chapter, props: Record<string, unknown>, role: "use
   const notes = pending
     ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: delta } : n))
     : chapter.notes;
-  return { ...chapter, blocks, notes, busy: true };
+  const footnotes = pending ? chapter.footnotes : adoptPending(chapter.footnotes, partID, delta);
+  return { ...chapter, blocks, notes, footnotes, busy: true };
 }
 
 function upsertTool(chapter: Chapter, part: Record<string, unknown>): Chapter {
@@ -267,9 +271,11 @@ function upsertTool(chapter: Chapter, part: Record<string, unknown>): Chapter {
     }
   }
   const sentence = footnoteSentence(like, plateId ? plates.find((p) => p.id === plateId)?.n : undefined);
-  const anchor = anchorFor(chapter);
   const footnotes = chapter.footnotes.slice();
   const existing = footnotes.findIndex((f) => f.id === id);
+  // Once set, an anchor stays put; only a footnote still waiting for text is placed again.
+  const kept = existing >= 0 && footnotes[existing].blockId !== "pending" ? footnotes[existing] : undefined;
+  const anchor = kept ? { blockId: kept.blockId, offset: kept.offset } : anchorFor(chapter);
   const note: Footnote = {
     id,
     n: existing >= 0 ? footnotes[existing].n : nextFootnote(footnotes),
@@ -344,11 +350,28 @@ function verb(permission: string): string {
   return "edit";
 }
 
+/**
+ * Hang a new footnote at the end of the last finished sentence of the last
+ * block in the main flow, so the mark does not ride the tail as text streams in.
+ */
 function anchorFor(chapter: Chapter): { blockId: string; offset: number } {
   const blocks = chapter.blocks.filter((b) => !b.marginal);
   const last = blocks[blocks.length - 1];
-  if (!last) return { blockId: "pending", offset: 0 };
-  return { blockId: last.id, offset: last.text.length };
+  if (!last || !last.text.trim()) return { blockId: "pending", offset: 0 };
+  return { blockId: last.id, offset: sentenceEnd(last.text) ?? last.text.trimEnd().length };
+}
+
+/** Offset just past the last sentence that has ended, or undefined if none has. */
+function sentenceEnd(text: string): number | undefined {
+  let end: number | undefined;
+  for (const match of text.matchAll(/[.!?…]+["'”’)\]]*(?=\s|$)/g)) end = (match.index ?? 0) + match[0].length;
+  return end;
+}
+
+/** A footnote that came before any text hangs at the start of the next text part. */
+function adoptPending(footnotes: Footnote[], blockId: string, text: string): Footnote[] {
+  if (!text.trim() || !footnotes.some((f) => f.blockId === "pending")) return footnotes;
+  return footnotes.map((f) => (f.blockId === "pending" ? { ...f, blockId, offset: 0 } : f));
 }
 
 function nextFootnote(notes: Footnote[]): number {
