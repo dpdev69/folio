@@ -4,13 +4,17 @@
   "version": "0.1.0",
   "description": "Folio is a book-skinned desktop client for the opencode server.",
   "type": "module",
+  "opencode": {
+    "version": "2.0.28"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 47321 --strictPort",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 47321 --strictPort",
     "test": "vitest run",
     "tauri": "tauri",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "fetch-press": "node scripts/fetch-opencode.mjs"
   },
   "dependencies": {
     "@fontsource/caveat": "^5.2.8",
