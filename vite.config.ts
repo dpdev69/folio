@@ -1,23 +1,17 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { installPress, probePress, servePress } from "./press/host";
+import { installPress, probePress, readBookFile, servePress, stopPress, writeBookFile } from "./press/host";
 
-// The browser dev server talks to opencode through this same-origin proxy,
-// so the page does not need CORS. Tauri uses the Rust proxy instead.
-// /folio/* is the local press helper: detect, install, and start opencode.
+// The page calls the opencode server directly with Basic auth (CORS allows
+// http://127.0.0.1:*). /folio/* is the local press helper: detect, install and
+// start opencode, and read or write files in the open book.
 export default defineConfig({
   plugins: [react(), pressPlugin()],
   server: {
     host: "127.0.0.1",
     port: 47321,
     strictPort: true,
-    proxy: {
-      "/engine": {
-        target: "http://127.0.0.1:4096",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/engine/, ""),
-      },
-    },
   },
   preview: {
     host: "127.0.0.1",
@@ -27,30 +21,57 @@ export default defineConfig({
   clearScreen: false,
 });
 
+const ORIGINS = new Set(["http://127.0.0.1:47321", "http://localhost:47321"]);
+
 function pressPlugin(): Plugin {
   return {
     name: "folio-press",
     configureServer(server) {
+      server.httpServer?.once("close", stopPress);
+      process.once("exit", stopPress);
       server.middlewares.use(async (req, res, next) => {
-        const url = req.url?.split("?")[0];
-        if (!url?.startsWith("/folio/")) return next();
+        const url = new URL(req.url ?? "/", "http://folio");
+        if (!url.pathname.startsWith("/folio/")) return next();
+        // Only Folio's own page may start the press or touch files.
+        const origin = req.headers.origin;
+        const site = req.headers["sec-fetch-site"];
+        if ((origin && !ORIGINS.has(origin)) || site === "cross-site") return reply(res, 403, { ok: false, error: "Not for this page." });
         try {
-          const body =
-            url === "/folio/press"
-              ? await probePress()
-              : url === "/folio/serve" && req.method === "POST"
-                ? await servePress()
-                : url === "/folio/install" && req.method === "POST"
-                  ? await installPress()
-                  : null;
-          if (!body) return next();
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(body));
+          const route = `${req.method} ${url.pathname}`;
+          if (route === "GET /folio/press") return reply(res, 200, await probePress());
+          if (route === "POST /folio/serve") return reply(res, 200, await servePress());
+          if (route === "POST /folio/install") return reply(res, 200, await installPress());
+          if (route === "POST /folio/write") {
+            const body = (await readJson(req)) as { directory?: unknown; path?: unknown; content?: unknown };
+            if (typeof body.directory !== "string" || typeof body.path !== "string" || typeof body.content !== "string") {
+              return reply(res, 400, { ok: false, error: "A write needs a directory, a path and content." });
+            }
+            return reply(res, 200, await writeBookFile(body.directory, body.path, body.content));
+          }
+          if (route === "GET /folio/read") {
+            const directory = url.searchParams.get("directory") ?? "";
+            const file = url.searchParams.get("path") ?? "";
+            return reply(res, 200, await readBookFile(directory, file));
+          }
+          return next();
         } catch (error) {
-          res.statusCode = 500;
-          res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "press helper failed" }));
+          return reply(res, 500, { ok: false, error: error instanceof Error ? error.message : "The press helper failed." });
         }
       });
     },
   };
+}
+
+function reply(res: ServerResponse, status: number, body: unknown) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Cache-Control", "no-store");
+  res.end(JSON.stringify(body));
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  if (!req.headers["content-type"]?.includes("application/json")) return {};
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
