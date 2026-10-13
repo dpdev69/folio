@@ -7,7 +7,7 @@ import { revealNextLine, type Measure } from "../book/wrap";
 import { EngineClient, PRESS_SYSTEM, type EngineAuth } from "../engine/client";
 import { coalesce } from "../engine/coalesce";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
-import { initialNav, reduceNav, type Nav } from "./nav";
+import { followTail, initialNav, reduceNav, type Nav } from "./nav";
 import { SCALES, inkFont, proseFont } from "../ui/scales";
 import { FIRST_PAGE, FIRST_PAGE_ID, keyProviders, modelSummary, type PressPhase } from "../welcome/copy";
 
@@ -114,17 +114,18 @@ export function useFolio() {
     });
   }, [layout.chapterStart, fontsReady]);
 
-  const prevSpreads = useRef(0);
+  const prevPages = useRef<string[]>([]);
   useEffect(() => {
-    const prev = prevSpreads.current;
-    prevSpreads.current = spreadCount;
-    if (!book || prev === 0 || spreadCount <= prev) return;
+    const before = prevPages.current;
+    const after = layout.pages.map((page) => page.chapterId);
+    prevPages.current = after;
+    if (!book || before.length === 0) return;
     setNav((current) => {
       if (current.curl || current.view !== "reading") return current;
-      if (current.spread !== prev - 1) return current;
-      return { ...current, curl: { to: current.spread + 1, forward: true } };
+      const to = followTail(before, after, current.spread);
+      return to == null ? current : { ...current, curl: { to, forward: true } };
     });
-  }, [spreadCount, book]);
+  }, [layout.pages, book]);
 
   function stopStream() {
     if (streamRef.current != null) window.clearTimeout(streamRef.current);

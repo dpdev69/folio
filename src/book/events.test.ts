@@ -4,7 +4,7 @@ import { quillKey } from "./quill";
 import type { Book } from "./model";
 import { pushSse, unwrapEvent } from "../engine/sse";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
-import { reduceNav, initialNav } from "../state/nav";
+import { followTail, reduceNav, initialNav } from "../state/nav";
 
 function book(): Book {
   return {
@@ -314,5 +314,30 @@ describe("footnote anchors", () => {
     next = applyEvent(next, delta("p2", " Twice."));
     next = applyEvent(next, tool("completed"));
     expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "p2", offset: 0 });
+  });
+});
+
+describe("following the tail", () => {
+  // One chapter id per laid page; two pages make a spread.
+  const before = ["i", "i", "ii", "ii", "ii", "ii"];
+
+  it("turns when the reader is on the last spread of the chapter that grew onto a new page", () => {
+    expect(followTail(before, [...before, "ii", "ii"], 2)).toBe(3);
+  });
+
+  it("stays when the reader is earlier in that chapter", () => {
+    expect(followTail(before, [...before, "ii", "ii"], 1)).toBeNull();
+  });
+
+  it("stays when another chapter grew", () => {
+    const after = ["i", "i", "i", "i", "ii", "ii", "ii", "ii"];
+    expect(followTail(before, after, 2)).toBeNull();
+    expect(followTail(before, [...before, "iii", "iii"], 2)).toBeNull();
+  });
+
+  it("stays when the chapter grew but the next spread belongs to another chapter", () => {
+    const middle = ["i", "i", "i", "ii", "ii", "ii"];
+    const grown = ["i", "i", "i", "i", "ii", "ii", "ii", "ii"];
+    expect(followTail(middle, grown, 1)).toBeNull();
   });
 });
