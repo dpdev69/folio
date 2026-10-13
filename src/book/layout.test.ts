@@ -17,6 +17,7 @@ function chapter(text: string): Chapter {
     plates: [],
     notes: [],
     asks: [],
+    forms: [],
     busy: false,
   };
 }
@@ -169,17 +170,16 @@ describe("adopted footnotes", () => {
   function pressed(lead: string): Chapter[] {
     const shell: Book = { id: "b", title: "b", directory: "/b", sample: false, chapters: [chapter("")] };
     shell.chapters[0] = { ...shell.chapters[0], blocks: [] };
-    let book = applyEvent(shell, {
-      type: "message.part.updated",
-      properties: { sessionID: "c", part: { id: "t", type: "tool", tool: "bash", state: { status: "running", input: {} } } },
+    const frame = (type: string, data: Record<string, unknown>) => ({
+      type,
+      data: { sessionID: "c", assistantMessageID: "m", ...data },
     });
+    let book = applyEvent(shell, frame("session.tool.input.started", { id: "t", name: "bash" }));
+    book = applyEvent(book, frame("session.tool.called", { id: "t", input: {} }));
     const steps: Chapter[] = [];
     for (let i = 0; i < 60; i++) {
       const delta = i === 0 ? `${lead}word${i}` : ` word${i}`;
-      book = applyEvent(book, {
-        type: "message.part.delta",
-        properties: { sessionID: "c", partID: "p", field: "text", delta },
-      });
+      book = applyEvent(book, frame("session.text.delta", { ordinal: 0, delta }));
       steps.push(book.chapters[0]);
     }
     return steps;
@@ -197,7 +197,7 @@ describe("adopted footnotes", () => {
     ["after leading blank lines", "\n\n"],
   ])("stays on the first line %s while the text grows", (_name, lead) => {
     const steps = pressed(lead);
-    expect(steps[0].footnotes[0]).toMatchObject({ blockId: "p", offset: 0 });
+    expect(steps[0].footnotes[0]).toMatchObject({ blockId: "m:t0", offset: 0 });
     for (const step of steps) expect(where(step)).toEqual([[0, 0]]);
     expect(paginateChapter(steps[steps.length - 1], opts).length).toBeGreaterThan(1);
   });

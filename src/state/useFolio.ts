@@ -393,6 +393,7 @@ export function useFolio() {
         plates: [],
         notes: [],
         asks: [],
+        forms: [],
         busy: false,
       };
       setBook({ ...book, chapters: [...book.chapters, chapter] });
@@ -775,6 +776,7 @@ function bookFromSessions(directory: string, sessions: { id: string; title?: str
         plates: [],
         notes: [],
         asks: [],
+        forms: [],
         busy: false,
       })),
   };

@@ -1,79 +1,93 @@
-import { plateLines } from "./diff";
-import { isUntitled, type Book, type Chapter, type Footnote, type Plate, type ProseBlock } from "./model";
-import { footnoteSentence, type ToolLike } from "./tools";
+import { isUntitled, type Book, type Chapter, type Footnote, type Form, type FormField, type ProseBlock } from "./model";
+import { applyDiff, dropPlate, filesOf, toolPlate } from "./plates";
+import { footnoteSentence, isEdit, type ToolLike } from "./tools";
 
-type Event = { type?: string; properties?: Record<string, unknown> };
+/**
+ * One event frame from opencode 2.0, `{id, type, data, location?}`, as it
+ * arrives, or one of Folio's own `folio.*` frames. Only `type`, `data` and
+ * `location` are read; anything without `data` is ignored.
+ */
+export type Frame = { type?: string; data?: unknown; location?: unknown; [key: string]: unknown };
 
-export function applyEvent(book: Book, event: Event): Book {
-  const type = event.type ?? "";
-  const props = event.properties ?? {};
-  if (type === "session.created" || type === "session.updated") {
-    const info = (props.info as Record<string, unknown> | undefined) ?? props;
-    return upsertChapterShell(book, info);
-  }
-  if (type === "session.deleted") {
-    const id = stringOf(props.sessionID) ?? stringOf(props.id);
-    if (!id) return book;
-    return { ...book, chapters: book.chapters.filter((c) => c.id !== id) };
-  }
-  const sessionID = stringOf(props.sessionID);
+type Data = Record<string, unknown>;
+
+export function applyEvent(book: Book, frame: Frame): Book {
+  const type = frame.type ?? "";
+  const data = recordOf(frame.data);
+  if (!data) return book;
+  if (type === "session.created") return addChapterShell(book, data, recordOf(frame.location));
+  // form.created carries its session only inside the form.
+  const sessionID = stringOf(data.sessionID) ?? stringOf(recordOf(data.form)?.sessionID);
   if (!sessionID) return book;
   const index = book.chapters.findIndex((c) => c.id === sessionID);
   if (index < 0) return book;
-  let chapter = book.chapters[index];
-
-  if (type === "session.idle") {
-    chapter = {
-      ...chapter,
-      busy: false,
-      notes: chapter.notes.map((n) => (n.pending ? { ...n, pending: false } : n)),
-    };
-  }
-  else if (type === "session.status") {
-    const status = props.status as { type?: string } | undefined;
-    chapter = { ...chapter, busy: status?.type !== "idle" };
-  } else if (type === "session.error") {
-    const message = stringOf((props.error as { message?: string } | undefined)?.message) ?? "The press stopped.";
-    chapter = { ...chapter, busy: false, error: message };
-  } else if (type === "session.diff") {
-    chapter = applyDiff(chapter, props.diff);
-  } else if (type === "message.updated") {
-    const info = props.info as { id?: string; role?: string; error?: { message?: string } } | undefined;
-    if (info?.id && (info.role === "user" || info.role === "assistant")) {
-      chapter = {
-        ...chapter,
-        messageRoles: { ...chapter.messageRoles, [info.id]: info.role },
-      };
-    }
-    if (info?.error?.message) chapter = { ...chapter, error: info.error.message, busy: false };
-    if (info?.role === "assistant") chapter = { ...chapter, busy: true, error: undefined };
-  } else if (type === "message.part.updated") {
-    const part = props.part ?? props;
-    chapter = rememberPartType(chapter, part);
-    chapter = applyPart(chapter, part, roleFrom(props, chapter, part));
-  } else if (type === "message.part.delta") {
-    chapter = applyDelta(chapter, props, roleFrom(props, chapter, props));
-  } else if (type === "message.part.removed") {
-    const partID = stringOf(props.partID);
-    if (partID) {
-      chapter = {
-        ...chapter,
-        blocks: chapter.blocks.filter((b) => b.id !== partID),
-        footnotes: chapter.footnotes.filter((f) => f.id !== partID),
-      };
-    }
-  } else if (type === "permission.asked" || type === "permission.updated") {
-    chapter = addAsk(chapter, props);
-  } else if (type === "permission.replied") {
-    const id = stringOf(props.requestID) ?? stringOf(props.permissionID) ?? stringOf(props.id);
-    chapter = { ...chapter, asks: chapter.asks.filter((a) => a.id !== id) };
-  } else {
-    return book;
-  }
-
+  if (type === "session.deleted") return { ...book, chapters: book.chapters.filter((c) => c.id !== sessionID) };
+  const chapter = book.chapters[index];
+  const next = reduceChapter(chapter, type, data);
+  if (next === chapter) return book;
   const chapters = book.chapters.slice();
-  chapters[index] = chapter;
+  chapters[index] = next;
   return { ...book, chapters };
+}
+
+function reduceChapter(chapter: Chapter, type: string, data: Data): Chapter {
+  const aid = stringOf(data.assistantMessageID);
+  const ordinal = numberOf(data.ordinal);
+  const id = stringOf(data.id);
+  switch (type) {
+    case "session.renamed":
+      return retitle(chapter, stringOf(data.title));
+    case "session.execution.started":
+      return { ...chapter, busy: true, error: undefined };
+    case "session.execution.succeeded":
+      return settle(chapter);
+    case "session.execution.failed":
+      return { ...settle(chapter), error: errorSentence(data.error) };
+    case "session.execution.interrupted":
+      return stringOf(data.reason) === "user" ? settle(chapter) : { ...settle(chapter), notice: "The press was interrupted." };
+    case "session.retry.scheduled": {
+      const attempt = numberOf(data.attempt);
+      return { ...chapter, notice: attempt ? `Trying again (attempt ${attempt})…` : "Trying again…" };
+    }
+    case "session.inbox.enqueued":
+      return enqueue(chapter, stringOf(data.inboxID), recordOf(data.item));
+    case "session.step.started":
+      return aid ? stepStarted(chapter, aid) : chapter;
+    case "session.step.ended":
+      return Array.isArray(data.files) && data.files.length && !chapter.diffStale ? { ...chapter, diffStale: true } : chapter;
+    case "session.text.started":
+      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), "", "grow") : chapter;
+    case "session.text.delta":
+      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), stringOf(data.delta) ?? "", "append") : chapter;
+    case "session.text.ended":
+      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), stringOf(data.text) ?? "", "end") : chapter;
+    case "session.tool.input.started":
+      // Only this event names the tool; the rest of the input stream is ignored.
+      return id ? nameTool(chapter, id, stringOf(data.name)) : chapter;
+    case "session.tool.called":
+      return id ? toolCalled(chapter, id, recordOf(data.input) ?? {}, aid, stringOf(data.name)) : chapter;
+    case "session.tool.success":
+      return id ? toolSucceeded(chapter, id, data.content, data.metadata) : chapter;
+    case "session.tool.failed":
+      return id ? toolFailed(chapter, id, data.error) : chapter;
+    case "permission.asked":
+      return addAsk(chapter, data);
+    case "permission.replied": {
+      const requestID = stringOf(data.requestID);
+      return chapter.asks.some((a) => a.id === requestID)
+        ? { ...chapter, asks: chapter.asks.filter((a) => a.id !== requestID) }
+        : chapter;
+    }
+    case "form.created":
+      return addForm(chapter, recordOf(data.form));
+    case "form.replied":
+    case "form.cancelled":
+      return chapter.forms.some((f) => f.id === id) ? { ...chapter, forms: chapter.forms.filter((f) => f.id !== id) } : chapter;
+    case "folio.diff":
+      return applyDiff(chapter, data.diff, lastInkId(chapter));
+    default:
+      return chapter;
+  }
 }
 
 export function appendPrompt(chapter: Chapter, text: string, id = `local-${Date.now()}`): Chapter {
@@ -88,186 +102,178 @@ export function attachNoteReply(chapter: Chapter, noteId: string, reply: string)
   };
 }
 
-function upsertChapterShell(book: Book, info: Record<string, unknown>): Book {
-  const id = stringOf(info.id) ?? stringOf(info.sessionID);
+/** Text parts have no ids in opencode 2.0; they are addressed by message and ordinal. */
+export function textBlockId(assistantMessageID: string, ordinal: number): string {
+  return `${assistantMessageID}:t${ordinal}`;
+}
+
+/** The press stopped with this error; say so in a sentence. */
+export function errorSentence(raw: unknown): string {
+  const error = recordOf(raw);
+  const message = stringOf(error?.message)?.trim();
+  if (message) return message;
+  if (stringOf(error?.type) === "aborted") return "The press was stopped before it finished.";
+  return "The press stopped.";
+}
+
+function addChapterShell(book: Book, data: Data, location: Data | undefined): Book {
+  const id = stringOf(data.sessionID) ?? stringOf(data.id);
   if (!id) return book;
-  const directory = stringOf(info.directory);
+  const directory = stringOf(recordOf(data.location)?.directory) ?? stringOf(location?.directory);
   if (directory && book.directory && directory !== book.directory) return book;
-  const title = stringOf(info.title) ?? "";
-  const untitled = isUntitled(title);
-  const existing = book.chapters.find((c) => c.id === id);
-  if (existing) {
-    return {
-      ...book,
-      chapters: book.chapters.map((c) =>
-        c.id === id ? { ...c, title: untitled ? c.title : title, untitled: untitled && c.untitled } : c,
-      ),
-    };
+  const title = stringOf(data.title);
+  const existing = book.chapters.findIndex((c) => c.id === id);
+  if (existing >= 0) {
+    const next = retitle(book.chapters[existing], title);
+    if (next === book.chapters[existing]) return book;
+    const chapters = book.chapters.slice();
+    chapters[existing] = next;
+    return { ...book, chapters };
   }
+  const untitled = isUntitled(title);
+  const chapter: Chapter = {
+    id,
+    title: untitled ? "Untitled" : title!,
+    untitled,
+    blocks: [],
+    footnotes: [],
+    plates: [],
+    notes: [],
+    asks: [],
+    forms: [],
+    busy: false,
+  };
+  return { ...book, chapters: [...book.chapters, chapter] };
+}
+
+/** A placeholder title never replaces a real one. */
+function retitle(chapter: Chapter, title: string | undefined): Chapter {
+  if (isUntitled(title) || (chapter.title === title && !chapter.untitled)) return chapter;
+  return { ...chapter, title: title!, untitled: false };
+}
+
+/** The run is over: idle, and a margin note still waiting will not get its reply. */
+function settle(chapter: Chapter): Chapter {
   return {
-    ...book,
-    chapters: [
-      ...book.chapters,
-      {
-        id,
-        title: untitled ? "Untitled" : title,
-        untitled,
-        blocks: [],
-        footnotes: [],
-        plates: [],
-        notes: [],
-        asks: [],
-        busy: false,
-      },
-    ],
+    ...chapter,
+    busy: false,
+    notes: chapter.notes.some((n) => n.pending) ? chapter.notes.map((n) => (n.pending ? { ...n, pending: false } : n)) : chapter.notes,
   };
 }
 
-function roleFrom(props: Record<string, unknown>, chapter: Chapter, raw: unknown): "user" | "assistant" {
-  if (props.role === "user" || props.role === "assistant") return props.role;
-  const part = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const messageID = stringOf(part.messageID) ?? stringOf(props.messageID);
-  if (messageID && chapter.messageRoles?.[messageID]) return chapter.messageRoles[messageID];
-  return "assistant";
+/**
+ * The prompt reached the press. The quill already set it in ink as `local-…`,
+ * renamed to the user message id once the prompt call returns, so only a
+ * prompt Folio did not write (another client, a queued line) is added here.
+ */
+function enqueue(chapter: Chapter, inboxID: string | undefined, item: Data | undefined): Chapter {
+  if (!inboxID || stringOf(item?.type) !== "user") return chapter;
+  const text = stringOf(recordOf(item?.payload)?.text) ?? "";
+  if (!text.trim()) return chapter;
+  const known = chapter.blocks.some(
+    (b) => b.id === inboxID || (b.voice === "ink" && b.id.startsWith("local-") && b.text.trim() === text.trim()),
+  );
+  if (known) return chapter;
+  return { ...chapter, blocks: [...chapter.blocks, { id: inboxID, voice: "ink", text }] };
 }
 
-/** Record every part's type, so delta events can be filtered by it later. */
-function rememberPartType(chapter: Chapter, raw: unknown): Chapter {
-  if (!raw || typeof raw !== "object") return chapter;
-  const part = raw as Record<string, unknown>;
-  const id = stringOf(part.id);
-  const type = stringOf(part.type);
-  if (!id || !type) return chapter;
-  if (chapter.partTypes?.[id] === type) return chapter;
-  return { ...chapter, partTypes: { ...chapter.partTypes, [id]: type } };
+/** A model step began: remember which prompt it answers, and drop a retry notice. */
+export function stepStarted(chapter: Chapter, assistantMessageID: string): Chapter {
+  const turn = lastInkId(chapter);
+  const turns = turn && chapter.turns?.[assistantMessageID] !== turn ? { ...chapter.turns, [assistantMessageID]: turn } : chapter.turns;
+  if (turns === chapter.turns && chapter.notice === undefined) return chapter;
+  return { ...chapter, turns, notice: undefined };
 }
 
-function applyPart(chapter: Chapter, raw: unknown, role: "user" | "assistant"): Chapter {
-  if (!raw || typeof raw !== "object") return chapter;
-  const part = raw as Record<string, unknown>;
-  const id = stringOf(part.id);
-  const type = stringOf(part.type);
-  if (!id || !type) return chapter;
-  if (type === "text") {
-    const text = stringOf(part.text) ?? "";
-    return upsertText(chapter, id, text, Boolean(part.ignored), role);
-  }
-  if (type === "tool") return upsertTool(chapter, part);
-  if (type === "reasoning") return chapter;
-  return chapter;
+/** Add a user prompt from history in ink. */
+export function addInk(chapter: Chapter, id: string, text: string): Chapter {
+  if (!text.trim() || chapter.blocks.some((b) => b.id === id)) return chapter;
+  return { ...chapter, blocks: [...chapter.blocks, { id, voice: "ink", text }] };
 }
 
-function upsertText(
-  chapter: Chapter,
-  id: string,
-  text: string,
-  ignored: boolean,
-  role: "user" | "assistant",
-): Chapter {
-  if (ignored) return chapter;
-  const voice = role === "user" ? "ink" : "prose";
+/**
+ * Set a prose block's text. "grow" and "end" never shorten it; "end" also
+ * closes the margin note the block answers. A block written while a note waits
+ * is that note's reply and stays out of the main flow.
+ */
+export function setText(chapter: Chapter, id: string, text: string, mode: "append" | "grow" | "end"): Chapter {
   const blocks = chapter.blocks.slice();
   const index = blocks.findIndex((b) => b.id === id);
-  if (index >= 0) {
-    const prev = blocks[index];
-    if (text.length < prev.text.length) return chapter;
-    blocks[index] = { ...prev, text, voice: prev.marginal ? prev.voice : voice };
-    // An empty echo must not close a margin note that is still waiting for prose.
-    if (!text.trim()) return { ...chapter, blocks, busy: true };
-    const pending = prev.marginal ? chapter.notes.find((n) => n.pending) : undefined;
-    const notes = pending
-      ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: text, pending: false } : n))
+  const prev = index >= 0 ? blocks[index] : undefined;
+  let next: string;
+  if (!prev) next = text;
+  else if (mode === "append") next = prev.text + text;
+  else next = text.length >= prev.text.length ? text : prev.text;
+  const marginal = prev ? Boolean(prev.marginal) : chapter.notes.some((n) => n.pending);
+  const closes = marginal && mode === "end" && Boolean(next.trim());
+  if (prev && next === prev.text && !closes) return chapter;
+  if (prev) blocks[index] = { ...prev, text: next };
+  else blocks.push({ id, voice: "prose", text: next, marginal });
+  const pending = marginal ? chapter.notes.find((n) => n.pending) : undefined;
+  const notes =
+    pending && next.trim()
+      ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: next, pending: !closes } : n))
       : chapter.notes;
-    const footnotes = prev.marginal ? chapter.footnotes : adoptPending(chapter.footnotes, id, text);
-    return { ...chapter, blocks, notes, footnotes, busy: true };
-  }
-  const optimistic = blocks.findIndex((b) => b.id.startsWith("local-") && b.text.trim() === text.trim());
-  if (optimistic >= 0) {
-    blocks[optimistic] = { ...blocks[optimistic], id, voice: "ink" };
-    return { ...chapter, blocks };
-  }
-  const pending = role === "assistant" ? chapter.notes.find((n) => n.pending) : undefined;
-  blocks.push({ id, voice, text, marginal: Boolean(pending) });
-  let notes = chapter.notes;
-  if (pending && text.trim()) notes = notes.map((n) => (n.id === pending.id ? { ...n, reply: text, pending: false } : n));
-  const footnotes = pending ? chapter.footnotes : adoptPending(chapter.footnotes, id, text);
-  return { ...chapter, blocks, notes, footnotes, busy: true };
+  const footnotes = marginal ? chapter.footnotes : adoptPending(chapter.footnotes, id, next);
+  return { ...chapter, blocks, notes, footnotes };
 }
 
-function applyDelta(chapter: Chapter, props: Record<string, unknown>, role: "user" | "assistant"): Chapter {
-  const partID = stringOf(props.partID);
-  const delta = stringOf(props.delta) ?? "";
-  const field = stringOf(props.field) ?? "text";
-  if (!partID || !delta || field !== "text") return chapter;
-  // Reasoning and bookkeeping parts stream deltas too; only text parts are set in type.
-  const known = chapter.partTypes?.[partID];
-  if (known && known !== "text") return chapter;
-  const blocks = chapter.blocks.slice();
-  const index = blocks.findIndex((b) => b.id === partID);
-  if (index >= 0) {
-    const prev = blocks[index];
-    const text = prev.text + delta;
-    blocks[index] = { ...prev, text };
-    const pending = prev.marginal ? chapter.notes.find((n) => n.pending) : undefined;
-    const notes = pending
-      ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: text } : n))
-      : chapter.notes;
-    const footnotes = prev.marginal ? chapter.footnotes : adoptPending(chapter.footnotes, partID, text);
-    return { ...chapter, blocks, notes, footnotes, busy: true };
-  }
-  const pending = role === "assistant" ? chapter.notes.find((n) => n.pending) : undefined;
-  blocks.push({
-    id: partID,
-    voice: role === "user" ? "ink" : "prose",
-    text: delta,
-    marginal: Boolean(pending),
+function nameTool(chapter: Chapter, id: string, name: string | undefined): Chapter {
+  const known = chapter.calls?.[id];
+  if (!name || known?.name === name) return chapter;
+  return { ...chapter, calls: { ...chapter.calls, [id]: { input: {}, ...known, name } } };
+}
+
+export function toolCalled(
+  chapter: Chapter,
+  id: string,
+  input: Data,
+  messageId?: string,
+  name?: string,
+): Chapter {
+  const known = chapter.calls?.[id];
+  const call = { name: name ?? known?.name ?? "tool", input, messageId: messageId ?? known?.messageId };
+  return placeTool({ ...chapter, calls: { ...chapter.calls, [id]: call } }, id, { status: "running" });
+}
+
+export function toolSucceeded(chapter: Chapter, id: string, content: unknown, metadata: unknown): Chapter {
+  if (!chapter.calls?.[id]) return chapter;
+  return placeTool(chapter, id, { status: "completed", output: joinText(content) }, filesOf(metadata));
+}
+
+export function toolFailed(chapter: Chapter, id: string, raw: unknown): Chapter {
+  if (!chapter.calls?.[id]) return chapter;
+  const error = recordOf(raw);
+  const type = stringOf(error?.type);
+  return placeTool(chapter, id, {
+    status: "error",
+    error: stringOf(error?.message),
+    declined: type === "aborted" || type === "permission.rejected",
   });
-  const notes = pending
-    ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: delta } : n))
-    : chapter.notes;
-  const footnotes = pending ? chapter.footnotes : adoptPending(chapter.footnotes, partID, delta);
-  return { ...chapter, blocks, notes, footnotes, busy: true };
 }
 
-function upsertTool(chapter: Chapter, part: Record<string, unknown>): Chapter {
-  const id = stringOf(part.id)!;
-  const tool = stringOf(part.tool) ?? "tool";
-  const state = (part.state as Record<string, unknown> | undefined) ?? {};
-  const status = (stringOf(state.status) as ToolLike["status"]) ?? "running";
-  const like: ToolLike = {
-    tool,
-    title: stringOf(state.title),
-    input: (state.input as Record<string, unknown> | undefined) ?? {},
-    status,
-    output: stringOf(state.output),
-    error: stringOf(state.error),
-    startedAt: numberOf((state.time as { start?: number } | undefined)?.start),
-    endedAt: numberOf((state.time as { end?: number } | undefined)?.end),
-  };
-  const opensPlate = footnoteSentence(like).opensPlate;
+/** Word a tool call as a footnote, and set the plate of a file it changed. */
+function placeTool(
+  chapter: Chapter,
+  id: string,
+  outcome: Pick<ToolLike, "status" | "output" | "error" | "declined">,
+  files: ReturnType<typeof filesOf> = [],
+): Chapter {
+  const call = chapter.calls![id];
+  const like: ToolLike = { tool: call.name, input: call.input, ...outcome };
   let plates = chapter.plates;
   let plateId: string | undefined;
-  if (opensPlate && (status === "completed" || status === "running")) {
-    plateId = `plate-${id}`;
-    if (!plates.some((p) => p.id === plateId)) {
-      const n = plates.length + 1;
-      const file = firstFile(like.input);
-      plates = [
-        ...plates,
-        {
-          id: plateId,
-          n,
-          messageId: stringOf(part.messageID),
-          file: file ?? "the file",
-          title: like.title || `Plate ${n}`,
-          caption: file ? `The change in ${file}.` : "The change, before and after.",
-          lines: plateFromTool(like),
-          additions: count(firstString(like.input, ["newString", "new_string", "content"])),
-          deletions: count(firstString(like.input, ["oldString", "old_string"])),
-          status: "open",
-          folded: false,
-        },
-      ];
+  if (isEdit(call.name)) {
+    if (outcome.status === "error") plates = dropPlate(plates, `plate-${id}`);
+    else {
+      const turn = (call.messageId && chapter.turns?.[call.messageId]) || lastInkId(chapter);
+      const set = toolPlate(plates, `plate-${id}`, call, files, turn);
+      plates = set.plates;
+      if (set.plate) {
+        plateId = set.plate.id;
+        like.additions = set.plate.additions;
+        like.deletions = set.plate.deletions;
+      }
     }
   }
   const sentence = footnoteSentence(like, plateId ? plates.find((p) => p.id === plateId)?.n : undefined);
@@ -283,71 +289,74 @@ function upsertTool(chapter: Chapter, part: Record<string, unknown>): Chapter {
     offset: anchor.offset,
     text: sentence.text,
     plateId,
-    pending: status === "running" || status === "pending",
+    pending: outcome.status === "running",
   };
   if (existing >= 0) footnotes[existing] = note;
   else footnotes.push(note);
   return { ...chapter, footnotes, plates };
 }
 
-function plateFromTool(tool: ToolLike): Plate["lines"] {
-  const before = firstString(tool.input, ["oldString", "old_string"]) ?? "";
-  const after = firstString(tool.input, ["newString", "new_string", "content"]) ?? "";
-  if (!before && !after) return [];
-  return plateLines(before, after, { context: 1, maxLines: 40 });
-}
-
-function applyDiff(chapter: Chapter, raw: unknown): Chapter {
-  if (!Array.isArray(raw)) return chapter;
-  let plates = chapter.plates.slice();
-  raw.forEach((item, index) => {
-    if (!item || typeof item !== "object") return;
-    const diff = item as Record<string, unknown>;
-    const file = stringOf(diff.file) ?? `file-${index + 1}`;
-    const before = stringOf(diff.before) ?? "";
-    const after = stringOf(diff.after) ?? "";
-    const id = `diff-${file}`;
-    const lines = plateLines(before, after, { context: 2, maxLines: 42 });
-    const existing = plates.find((p) => p.id === id || p.file === file);
-    const plate: Plate = {
-      id: existing?.id ?? id,
-      n: existing?.n ?? plates.length + 1,
-      messageId: existing?.messageId,
-      file,
-      title: existing?.title ?? file.split("/").pop() ?? file,
-      caption: `Fig. ${existing?.n ?? plates.length + 1}. ${file.split("/").pop() ?? file}.`,
-      lines: lines.length ? lines : (existing?.lines ?? []),
-      additions: numberOf(diff.additions) ?? existing?.additions ?? 0,
-      deletions: numberOf(diff.deletions) ?? existing?.deletions ?? 0,
-      status: existing?.status ?? "open",
-      folded: existing?.folded ?? false,
-    };
-    if (existing) plates = plates.map((p) => (p.id === existing.id ? plate : p));
-    else plates = [...plates, plate];
-  });
-  return { ...chapter, plates };
-}
-
-function addAsk(chapter: Chapter, props: Record<string, unknown>): Chapter {
-  const id = stringOf(props.id);
+function addAsk(chapter: Chapter, data: Data): Chapter {
+  const id = stringOf(data.id);
   if (!id) return chapter;
-  const permission = stringOf(props.permission) ?? stringOf(props.type) ?? "edit";
-  const patterns = Array.isArray(props.patterns)
-    ? props.patterns.filter((p): p is string => typeof p === "string")
-    : [stringOf(props.pattern)].filter((p): p is string => Boolean(p));
-  const file = patterns[0] && patterns[0] !== "*" ? patterns[0] : permission;
-  const title = `May I ${verb(permission)} ${file}?`;
-  const ask = { id, permission, patterns, title };
+  const permission = stringOf(data.action) ?? "*";
+  const patterns = Array.isArray(data.resources) ? data.resources.filter((r): r is string => typeof r === "string") : [];
+  const files = filesOf(data.metadata);
+  const target = patterns.filter((p) => p !== "*").join(", ") || files[0]?.file || "this";
+  const ask = { id, permission, patterns, title: `May I ${verb(permission)} ${target}?`, patch: files[0]?.patch };
   const asks = chapter.asks.some((a) => a.id === id)
     ? chapter.asks.map((a) => (a.id === id ? ask : a))
     : [...chapter.asks, ask];
   return { ...chapter, asks };
 }
 
-function verb(permission: string): string {
-  if (permission === "bash" || permission === "shell") return "run";
-  if (permission === "read") return "read";
-  return "edit";
+function verb(action: string): string {
+  if (action === "edit") return "edit";
+  if (action === "read") return "read";
+  if (action === "shell" || action === "bash") return "run";
+  if (action === "webfetch") return "fetch";
+  return "act on";
+}
+
+function addForm(chapter: Chapter, raw: Data | undefined): Chapter {
+  const id = stringOf(raw?.id);
+  if (!raw || !id) return chapter;
+  const fields = (Array.isArray(raw.fields) ? raw.fields : []).map(fieldOf).filter((f): f is FormField => Boolean(f));
+  const form: Form = { id, title: stringOf(raw.title) ?? "A question", fields };
+  const forms = chapter.forms.some((f) => f.id === id)
+    ? chapter.forms.map((f) => (f.id === id ? form : f))
+    : [...chapter.forms, form];
+  return { ...chapter, forms };
+}
+
+function fieldOf(raw: unknown): FormField | undefined {
+  const field = recordOf(raw);
+  const key = stringOf(field?.key);
+  const type = stringOf(field?.type);
+  if (!field || !key || !type) return undefined;
+  const out: FormField = { key, title: stringOf(field.title) ?? key, type };
+  const description = stringOf(field.description);
+  if (description) out.description = description;
+  if (Array.isArray(field.options)) {
+    out.options = field.options.flatMap((option) => {
+      const o = recordOf(option);
+      const value = stringOf(o?.value);
+      if (!o || value === undefined) return [];
+      const description = stringOf(o.description);
+      return [{ value, label: stringOf(o.label) ?? value, ...(description ? { description } : {}) }];
+    });
+  }
+  if (typeof field.custom === "boolean") out.custom = field.custom;
+  const min = numberOf(field.minItems) ?? numberOf(field.min) ?? numberOf(field.minimum);
+  const max = numberOf(field.maxItems) ?? numberOf(field.max) ?? numberOf(field.maximum);
+  if (min !== undefined) out.min = min;
+  if (max !== undefined) out.max = max;
+  return out;
+}
+
+function lastInkId(chapter: Chapter): string | undefined {
+  for (let i = chapter.blocks.length - 1; i >= 0; i--) if (chapter.blocks[i].voice === "ink") return chapter.blocks[i].id;
+  return undefined;
 }
 
 /**
@@ -378,22 +387,18 @@ function nextFootnote(notes: Footnote[]): number {
   return notes.reduce((max, note) => Math.max(max, note.n), 0) + 1;
 }
 
-function firstFile(input: Record<string, unknown> | undefined): string | undefined {
-  return firstString(input, ["filePath", "file", "path", "file_path"]);
+/** A tool's output is the text of its content items. */
+function joinText(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((item) => (recordOf(item)?.type === "text" ? stringOf(recordOf(item)?.text) : undefined))
+    .filter((t): t is string => t !== undefined)
+    .join("\n");
+  return text || undefined;
 }
 
-function firstString(input: Record<string, unknown> | undefined, keys: string[]): string | undefined {
-  if (!input) return undefined;
-  for (const key of keys) {
-    const value = input[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function count(text: string | undefined): number {
-  if (!text) return 0;
-  return text.split("\n").filter((line) => line.length).length;
+function recordOf(value: unknown): Data | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Data) : undefined;
 }
 
 function stringOf(value: unknown): string | undefined {
@@ -401,5 +406,5 @@ function stringOf(value: unknown): string | undefined {
 }
 
 function numberOf(value: unknown): number | undefined {
-  return typeof value === "number" ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

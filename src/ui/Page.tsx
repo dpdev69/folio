@@ -145,6 +145,7 @@ function fallbackChapter(id: string): Chapter {
     plates: [],
     notes: [],
     asks: [],
+    forms: [],
     busy: false,
   };
 }

@@ -31,7 +31,10 @@ export type PlateLine = {
 export type Plate = {
   id: string;
   n: number;
+  /** The assistant message that made the change. */
   messageId?: string;
+  /** The user message that began the turn, so the turn can be named and undone. */
+  turnMessageId?: string;
   file: string;
   title: string;
   caption: string;
@@ -57,7 +60,30 @@ export type PermissionAsk = {
   permission: string;
   patterns: string[];
   title: string;
+  /** The proposed change, as a unified patch, when the press sent one. */
+  patch?: string;
 };
+
+export type FormOption = { value: string; label: string; description?: string };
+
+export type FormField = {
+  key: string;
+  title: string;
+  description?: string;
+  /** string, number, integer, boolean, multiselect, external. */
+  type: string;
+  options?: FormOption[];
+  /** The reader may write an answer of their own. */
+  custom?: boolean;
+  min?: number;
+  max?: number;
+};
+
+/** A question from the press, waiting for the reader. */
+export type Form = { id: string; title: string; fields: FormField[] };
+
+/** A tool call in progress. opencode 2.0 names a tool only when its input starts. */
+export type ToolCall = { name: string; input: Record<string, unknown>; messageId?: string };
 
 export type Chapter = {
   id: string;
@@ -68,12 +94,17 @@ export type Chapter = {
   plates: Plate[];
   notes: MarginNote[];
   asks: PermissionAsk[];
-  /** message id → role, so streamed parts know whether they are ink or prose. */
-  messageRoles?: Record<string, "user" | "assistant">;
-  /** part id → part type, so deltas for reasoning and bookkeeping parts are dropped. */
-  partTypes?: Record<string, string>;
+  forms: Form[];
+  /** assistant message id → the user message id that began its turn. */
+  turns?: Record<string, string>;
+  /** tool call id → its name and input, so later events for the call can be worded. */
+  calls?: Record<string, ToolCall>;
   busy: boolean;
   error?: string;
+  /** A passing remark from the press, such as a retry. */
+  notice?: string;
+  /** Files changed since the plates were last set from the session diff. */
+  diffStale?: boolean;
 };
 
 export type Book = {

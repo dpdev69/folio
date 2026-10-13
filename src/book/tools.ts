@@ -132,8 +132,9 @@ function sentence(text: string): string {
   return /[.?!…]$/.test(text) ? text : `${text}.`;
 }
 
-function isEdit(name: string): boolean {
-  return ["edit", "write", "apply_patch", "multiedit", "patch"].includes(name);
+/** Tools that change a file, and so open a plate. */
+export function isEdit(name: string): boolean {
+  return ["edit", "write", "apply_patch", "multiedit", "patch"].includes(name.toLowerCase());
 }
 
 function firstString(input: Record<string, unknown> | undefined, keys: string[]): string | undefined {

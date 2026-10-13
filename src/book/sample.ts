@@ -12,6 +12,7 @@ function chapter(partial: Pick<Chapter, "id" | "title" | "untitled"> & Partial<C
     plates: [],
     notes: [],
     asks: [],
+    forms: [],
     busy: false,
     ...partial,
   };

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { applyEvent, appendPrompt } from "./events";
+import { applyEvent, appendPrompt, type Frame } from "./events";
+import { parsePatch } from "./diff";
 import { quillKey } from "./quill";
-import type { Book } from "./model";
+import type { Book, Chapter } from "./model";
 import { pushSse, unwrapEvent } from "../engine/sse";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, reduceNav, initialNav } from "../state/nav";
+import { captures, editDiff, FIXTURE_DIRECTORY } from "./__fixtures__/load";
 
 function book(): Book {
   return {
@@ -22,201 +24,395 @@ function book(): Book {
         plates: [],
         notes: [],
         asks: [],
+        forms: [],
         busy: false,
       },
     ],
   };
 }
 
-describe("events", () => {
-  it("streams text onto the page and names the chapter when the session title arrives", () => {
-    let next = applyEvent(book(), {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "p1", type: "text", text: "The test failed only on the build server." },
-      },
-    });
-    next = applyEvent(next, {
-      type: "message.part.delta",
-      properties: { sessionID: "ses_1", partID: "p1", field: "text", delta: " That was the clue." },
-    });
-    expect(next.chapters[0].blocks[0].text).toBe("The test failed only on the build server. That was the clue.");
-    next = applyEvent(next, {
-      type: "session.updated",
-      properties: { info: { id: "ses_1", directory: "/repos/api-server", title: "The flaky login test" } },
-    });
-    expect(next.chapters[0].untitled).toBe(false);
-    expect(next.chapters[0].title).toBe("The flaky login test");
+/** An empty shelf for the repository the captures were recorded in. */
+function shelf(): Book {
+  return { id: "repo", title: "repo", directory: FIXTURE_DIRECTORY, sample: false, chapters: [] };
+}
+
+/** Every frame of a capture, parsed and unwrapped the way the client does it. */
+function frames(capture: string): Frame[] {
+  return pushSse("", capture).events.map(unwrapEvent);
+}
+
+/** Apply frames in order; stop after the first frame `until` accepts. */
+function play(start: Book, list: Frame[], until?: (frame: Frame) => boolean): Book {
+  let next = start;
+  for (const frame of list) {
+    next = applyEvent(next, frame);
+    if (until?.(frame)) break;
+  }
+  return next;
+}
+
+function only(next: Book): Chapter {
+  expect(next.chapters).toHaveLength(1);
+  return next.chapters[0];
+}
+
+function data(frame: Frame): Record<string, unknown> {
+  return (frame.data ?? {}) as Record<string, unknown>;
+}
+
+function ev(type: string, fields: Record<string, unknown> = {}): Frame {
+  return { id: "evt_x", type, data: { sessionID: "ses_1", ...fields } };
+}
+
+const PROMPT = "Add a `farewell(name)` function next to `greet` in src/greet.ts and briefly explain what you did";
+
+describe("the edit capture (fixture-edit.sse)", () => {
+  const list = frames(captures.edit);
+
+  it("parses as opencode 2.0 frames", () => {
+    expect(list.length).toBeGreaterThan(30);
+    expect(list.every((frame) => typeof frame.type === "string" && frame.data !== undefined)).toBe(true);
   });
 
-  it("turns a tool part into a footnote and a file diff into a plate", () => {
-    let next = applyEvent(book(), {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "t1", type: "text", text: "I reordered the setup." },
-      },
+  it("sets the prompt in ink, two footnotes, one plate and the explanation as prose", () => {
+    const chapter = only(play(shelf(), list));
+    expect(chapter.title).toBe("fixture edit");
+    expect(chapter.untitled).toBe(false);
+    const ink = chapter.blocks.filter((b) => b.voice === "ink");
+    const prose = chapter.blocks.filter((b) => b.voice === "prose");
+    expect(ink).toEqual([{ id: "msg_1378318cd0011en9zAGWcvx4bC", voice: "ink", text: PROMPT }]);
+    expect(prose).toHaveLength(1);
+    expect(prose[0].id).toBe("msg_137831fee001iiy0rpghC3oXA3:t0");
+    expect(prose[0].text).toBe(
+      "Added a `farewell(name)` function to `src/greet.ts` that returns `Goodbye, ${name}!`, mirroring the existing `greet` function's style.",
+    );
+    // The capture has two tool calls: read, then edit.
+    expect(chapter.footnotes.map((f) => [f.n, f.text, f.pending])).toEqual([
+      [1, "Read src/greet.ts.", false],
+      [2, "Edited src/greet.ts, 4 lines added. See Plate I →", false],
+    ]);
+    expect(chapter.plates).toHaveLength(1);
+    const plate = chapter.plates[0];
+    expect(chapter.footnotes[1].plateId).toBe(plate.id);
+    expect(plate).toMatchObject({
+      n: 1,
+      file: "src/greet.ts",
+      additions: 4,
+      deletions: 0,
+      status: "open",
+      messageId: "msg_137831c9e001HUpkVsrAUYd8JQ",
+      turnMessageId: "msg_1378318cd0011en9zAGWcvx4bC",
     });
-    next = applyEvent(next, {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: {
-          id: "tool1",
-          type: "tool",
-          tool: "edit",
-          messageID: "msg_1",
-          state: {
-            status: "completed",
-            title: "session.ts",
-            input: {
-              filePath: "tests/fixtures/session.ts",
-              oldString: "const token = mint();",
-              newString: "useFakeTimers();\nconst token = mint();",
-            },
-            time: { start: 0, end: 10 },
+    expect(plate.lines.some((l) => l.kind === "add" && l.text === "export function farewell(name: string): string {")).toBe(
+      true,
+    );
+  });
+
+  it("leaves no reasoning on the page and ends idle", () => {
+    const chapter = only(play(shelf(), list));
+    const page = JSON.stringify([chapter.blocks, chapter.footnotes, chapter.notes]);
+    expect(page).not.toContain("Let me look at the file first");
+    expect(page).not.toContain("Brief explanation");
+    expect(chapter.busy).toBe(false);
+    expect(chapter.error).toBeUndefined();
+  });
+
+  it("is busy while the press runs and names each step's turn", () => {
+    const running = only(play(shelf(), list, (f) => f.type === "session.execution.started"));
+    expect(running.busy).toBe(true);
+    const chapter = only(play(shelf(), list));
+    expect(chapter.turns).toEqual({
+      msg_1378318e10012iu0GHevUQHJMp: "msg_1378318cd0011en9zAGWcvx4bC",
+      msg_137831c9e001HUpkVsrAUYd8JQ: "msg_1378318cd0011en9zAGWcvx4bC",
+      msg_137831fee001iiy0rpghC3oXA3: "msg_1378318cd0011en9zAGWcvx4bC",
+    });
+  });
+
+  it("marks the diff stale only after a step that changed files", () => {
+    const readStep = only(
+      play(shelf(), list, (f) => f.type === "session.step.ended" && (data(f).files as string[]).length === 0),
+    );
+    expect(readStep.diffStale).toBeUndefined();
+    const editStep = only(play(shelf(), list, (f) => f.type === "session.step.ended" && (data(f).files as string[]).length > 0));
+    expect(editStep.diffStale).toBe(true);
+    expect(only(play(shelf(), list)).diffStale).toBe(true);
+  });
+
+  it("sets the session diff on the plate and clears the stale mark", () => {
+    const pressed = play(shelf(), list);
+    const sessionID = pressed.chapters[0].id;
+    const folded = {
+      ...pressed,
+      chapters: [{ ...pressed.chapters[0], plates: pressed.chapters[0].plates.map((p) => ({ ...p, folded: true })) }],
+    };
+    const chapter = only(applyEvent(folded, { type: "folio.diff", data: { sessionID, diff: editDiff } }));
+    expect(chapter.diffStale).toBe(false);
+    expect(chapter.plates).toHaveLength(1);
+    expect(chapter.plates[0]).toMatchObject({ n: 1, folded: true, status: "open", caption: "The change in src/greet.ts." });
+    expect(chapter.plates[0].lines).toEqual(parsePatch(editDiff[0].patch));
+  });
+
+  it("opens a new plate for a file the diff names first, for the current turn", () => {
+    const pressed = play(shelf(), list);
+    const sessionID = pressed.chapters[0].id;
+    const patch = "--- /dev/null\n+++ b/src/wave.ts\n@@ -0,0 +1,1 @@\n+export const wave = 1;\n";
+    const chapter = only(
+      applyEvent(pressed, {
+        type: "folio.diff",
+        data: { sessionID, diff: [{ file: "src/wave.ts", patch, additions: 1, deletions: 0, status: "added" }] },
+      }),
+    );
+    expect(chapter.plates[1]).toMatchObject({
+      id: "diff-src/wave.ts",
+      n: 2,
+      file: "src/wave.ts",
+      caption: "New file src/wave.ts.",
+      additions: 1,
+      turnMessageId: "msg_1378318cd0011en9zAGWcvx4bC",
+    });
+  });
+});
+
+describe("the ask capture (fixture-ask.sse)", () => {
+  const list = frames(captures.ask);
+
+  it("shows the ask with its patch, and the plate is never empty while it waits", () => {
+    const waiting = only(play(shelf(), list, (f) => f.type === "permission.asked"));
+    expect(waiting.asks).toHaveLength(1);
+    expect(waiting.asks[0]).toMatchObject({
+      id: "per_13784ca75001ULlav0hXATVSbe",
+      permission: "edit",
+      patterns: ["src/greet.ts"],
+      title: "May I edit src/greet.ts?",
+    });
+    expect(waiting.asks[0].patch).toContain("+export function farewell(name: string): string {");
+    expect(waiting.footnotes[1]).toMatchObject({ text: "Editing src/greet.ts…", pending: true });
+    expect(waiting.plates).toHaveLength(1);
+    expect(waiting.plates[0].lines.some((l) => l.kind === "add" && l.text.startsWith("export function farewell"))).toBe(
+      true,
+    );
+  });
+
+  it("takes the ask away once it is answered, and finishes the edit from the patch", () => {
+    const answered = only(play(shelf(), list, (f) => f.type === "permission.replied"));
+    expect(answered.asks).toEqual([]);
+    const chapter = only(play(shelf(), list));
+    expect(chapter.footnotes[1].text).toBe("Edited src/greet.ts, 4 lines added. See Plate I →");
+    const success = list.find((f) => f.type === "session.tool.success" && data(f).metadata && "files" in (data(f).metadata as object));
+    const files = (data(success!).metadata as { files: { patch: string }[] }).files;
+    expect(chapter.plates[0].lines).toEqual(parsePatch(files[0].patch));
+    expect(chapter.busy).toBe(false);
+  });
+});
+
+describe("the question capture (aux-question.sse)", () => {
+  const list = frames(captures.question);
+
+  it("sets out the form with its options, then puts it away when answered", () => {
+    const asked = only(play(shelf(), list, (f) => f.type === "form.created"));
+    expect(asked.forms).toEqual([
+      {
+        id: "frm_137858dc2001K01Vv8YDfRjzW1",
+        title: "Questions",
+        fields: [
+          {
+            key: "q0",
+            title: "Greet language",
+            description: "Which language should greet() use?",
+            type: "string",
+            options: [
+              { value: "English", label: "English", description: "Greet in English" },
+              { value: "French", label: "French", description: "Greet in French" },
+            ],
+            custom: true,
           },
-        },
+        ],
       },
-    });
-    expect(next.chapters[0].footnotes).toHaveLength(1);
-    expect(next.chapters[0].footnotes[0].text).toContain("See Plate");
-    expect(next.chapters[0].plates[0].file).toBe("tests/fixtures/session.ts");
-    next = applyEvent(next, {
-      type: "session.diff",
-      properties: {
-        sessionID: "ses_1",
-        diff: [{ file: "tests/fixtures/session.ts", before: "a\n", after: "b\n", additions: 1, deletions: 1 }],
-      },
-    });
-    expect(next.chapters[0].plates.some((p) => p.file === "tests/fixtures/session.ts")).toBe(true);
+    ]);
+    const chapter = only(play(shelf(), list));
+    expect(chapter.forms).toEqual([]);
+    expect(chapter.footnotes.map((f) => f.text)).toEqual(["Asked a question: Which language should greet() use?"]);
+    expect(chapter.blocks.filter((b) => b.voice === "prose").map((b) => b.text)).toEqual(["French."]);
+  });
+});
+
+describe("the reject capture (aux-reject.sse)", () => {
+  it("words the turned-down edit as declined, drops its plate, and lets the turn go on", () => {
+    const chapter = only(play(shelf(), frames(captures.reject)));
+    expect(chapter.footnotes.map((f) => f.text)).toEqual(["Read src/greet.ts.", "The edit to src/greet.ts was declined."]);
+    expect(chapter.footnotes[1].plateId).toBeUndefined();
+    expect(chapter.plates).toEqual([]);
+    expect(chapter.asks).toEqual([]);
+    const prose = chapter.blocks.filter((b) => b.voice === "prose");
+    expect(prose).toHaveLength(1);
+    expect(prose[0].text.startsWith("I added a `shout(name)` function")).toBe(true);
+    expect(chapter.busy).toBe(false);
+    expect(chapter.error).toBeUndefined();
+  });
+});
+
+describe("the interrupt capture (aux-interrupt.sse)", () => {
+  it("goes idle without an error and keeps the partial text", () => {
+    const chapter = only(play(shelf(), frames(captures.interrupt)));
+    expect(chapter.busy).toBe(false);
+    expect(chapter.error).toBeUndefined();
+    expect(chapter.notice).toBeUndefined();
+    const prose = chapter.blocks.filter((b) => b.voice === "prose");
+    expect(prose).toHaveLength(1);
+    expect(prose[0].text.startsWith("# The History of Greetings")).toBe(true);
+  });
+});
+
+describe("events", () => {
+  it("names the chapter on rename, unless the new title is a placeholder", () => {
+    let next = applyEvent(book(), ev("session.renamed", { title: "The flaky login test" }));
+    expect(next.chapters[0]).toMatchObject({ title: "The flaky login test", untitled: false });
+    next = applyEvent(next, ev("session.renamed", { title: "New session - 2026" }));
+    expect(next.chapters[0]).toMatchObject({ title: "The flaky login test", untitled: false });
   });
 
-  it("keeps a permission ask until it is answered", () => {
-    let next = applyEvent(book(), {
-      type: "permission.asked",
-      properties: { id: "per_1", sessionID: "ses_1", permission: "edit", patterns: ["src/auth.ts"] },
+  it("opens chapters only for this book's directory, and closes them on delete", () => {
+    const created = (directory: string, sessionID: string): Frame => ({
+      type: "session.created",
+      location: { directory },
+      data: { sessionID, location: { directory }, title: "Elsewhere" },
     });
-    expect(next.chapters[0].asks[0].title).toContain("src/auth.ts");
-    next = applyEvent(next, {
-      type: "permission.replied",
-      properties: { sessionID: "ses_1", requestID: "per_1", reply: "once" },
-    });
-    expect(next.chapters[0].asks).toHaveLength(0);
+    let next = applyEvent(book(), created("/repos/other", "ses_2"));
+    expect(next.chapters).toHaveLength(1);
+    next = applyEvent(next, created("/repos/api-server", "ses_3"));
+    expect(next.chapters.map((c) => c.id)).toEqual(["ses_1", "ses_3"]);
+    expect(next.chapters[1]).toMatchObject({ forms: [], asks: [], busy: false });
+    next = applyEvent(next, ev("session.deleted"));
+    expect(next.chapters.map((c) => c.id)).toEqual(["ses_3"]);
   });
 
-  it("replaces an optimistic quill line when the same text is echoed", () => {
-    const seeded = {
+  it("returns the same book for frames it does not set in type", () => {
+    const start = book();
+    expect(applyEvent(start, ev("session.usage.updated", { cost: 0 }))).toBe(start);
+    expect(applyEvent(start, ev("session.reasoning.delta", { assistantMessageID: "m", ordinal: 0, delta: "Hm" }))).toBe(start);
+    expect(applyEvent(start, ev("session.tool.success", { id: "call-unknown", content: [] }))).toBe(start);
+    expect(applyEvent(start, { type: "server.connected", data: {} })).toBe(start);
+    expect(applyEvent(start, { type: "message.part.updated", properties: { sessionID: "ses_1" } })).toBe(start);
+    expect(applyEvent(start, ev("session.text.delta", { sessionID: "ses_9", assistantMessageID: "m", ordinal: 0, delta: "x" }))).toBe(
+      start,
+    );
+  });
+
+  it("reports a failed run in a sentence and an interruption as a notice", () => {
+    let next = applyEvent(book(), ev("session.execution.started"));
+    next = applyEvent(next, ev("session.execution.failed", { error: { type: "provider", message: "The model is busy." } }));
+    expect(next.chapters[0]).toMatchObject({ busy: false, error: "The model is busy." });
+    next = applyEvent(next, ev("session.execution.started"));
+    expect(next.chapters[0].error).toBeUndefined();
+    next = applyEvent(next, ev("session.execution.failed", { error: { type: "unknown" } }));
+    expect(next.chapters[0].error).toBe("The press stopped.");
+    next = applyEvent(next, ev("session.execution.interrupted", { reason: "shutdown" }));
+    expect(next.chapters[0].notice).toBe("The press was interrupted.");
+  });
+
+  it("notes a retry until the next step begins", () => {
+    let next = applyEvent(book(), ev("session.retry.scheduled", { assistantMessageID: "m1", attempt: 2, error: {} }));
+    expect(next.chapters[0].notice).toBe("Trying again (attempt 2)…");
+    next = applyEvent(next, ev("session.step.started", { assistantMessageID: "m1" }));
+    expect(next.chapters[0].notice).toBeUndefined();
+  });
+
+  it("never shortens a block when the text ends", () => {
+    let next = applyEvent(book(), ev("session.text.delta", { assistantMessageID: "m1", ordinal: 0, delta: "The whole sentence." }));
+    next = applyEvent(next, ev("session.text.ended", { assistantMessageID: "m1", ordinal: 0, text: "The whole" }));
+    expect(next.chapters[0].blocks[0]).toEqual({ id: "m1:t0", voice: "prose", text: "The whole sentence.", marginal: false });
+  });
+
+  it("keeps the optimistic quill line when the prompt is enqueued, and names the turn after it", () => {
+    const seeded = { ...book(), chapters: [appendPrompt(book().chapters[0], "Cap it at two seconds.", "local-1")] };
+    let next = applyEvent(
+      seeded,
+      ev("session.inbox.enqueued", { inboxID: "msg_u1", item: { type: "user", payload: { text: "Cap it at two seconds.\n" } } }),
+    );
+    expect(next.chapters[0].blocks).toEqual([{ id: "local-1", voice: "ink", text: "Cap it at two seconds." }]);
+    next = applyEvent(next, ev("session.step.started", { assistantMessageID: "msg_a1" }));
+    expect(next.chapters[0].turns).toEqual({ msg_a1: "local-1" });
+  });
+
+  it("adds a prompt it has not seen, but not one already set under its message id", () => {
+    const seeded = { ...book(), chapters: [appendPrompt(book().chapters[0], "Cap it at two seconds.", "msg_u1")] };
+    const enqueued = (inboxID: string) =>
+      ev("session.inbox.enqueued", { inboxID, item: { type: "user", payload: { text: "Cap it at two seconds." } } });
+    expect(applyEvent(seeded, enqueued("msg_u1"))).toBe(seeded);
+    // The same words asked again later are a new prompt.
+    const next = applyEvent(seeded, enqueued("msg_u2"));
+    expect(next.chapters[0].blocks.map((b) => b.id)).toEqual(["msg_u1", "msg_u2"]);
+  });
+
+  it("asks in plain words for shell and wildcard permissions", () => {
+    let next = applyEvent(book(), ev("permission.asked", { id: "per_1", action: "shell", resources: ["npm test"] }));
+    next = applyEvent(next, ev("permission.asked", { id: "per_2", action: "*", resources: ["*"] }));
+    expect(next.chapters[0].asks.map((a) => a.title)).toEqual(["May I run npm test?", "May I act on this?"]);
+    next = applyEvent(next, ev("permission.replied", { requestID: "per_1", reply: "reject" }));
+    expect(next.chapters[0].asks.map((a) => a.id)).toEqual(["per_2"]);
+  });
+
+  it("removes a cancelled form", () => {
+    let next = applyEvent(
+      book(),
+      ev("form.created", { form: { id: "frm_1", title: "Questions", fields: [{ key: "q0", title: "Which?", type: "boolean" }] } }),
+    );
+    expect(next.chapters[0].forms).toEqual([{ id: "frm_1", title: "Questions", fields: [{ key: "q0", title: "Which?", type: "boolean" }] }]);
+    next = applyEvent(next, ev("form.cancelled", { id: "frm_1" }));
+    expect(next.chapters[0].forms).toEqual([]);
+  });
+
+  it("builds an edit plate from its strings until the patch arrives", () => {
+    let next = applyEvent(book(), ev("session.tool.input.started", { assistantMessageID: "m1", id: "call-1", name: "edit" }));
+    next = applyEvent(
+      next,
+      ev("session.tool.called", {
+        assistantMessageID: "m1",
+        id: "call-1",
+        input: { path: "src/a.ts", oldString: "one\ntwo", newString: "one\n2\ntwo" },
+      }),
+    );
+    const plate = next.chapters[0].plates[0];
+    expect(plate).toMatchObject({ id: "plate-call-1", file: "src/a.ts", additions: 1, deletions: 0, messageId: "m1" });
+    expect(plate.lines.map((l) => [l.kind, l.text])).toEqual([
+      ["context", "one"],
+      ["add", "2"],
+      ["context", "two"],
+    ]);
+  });
+});
+
+describe("margin notes", () => {
+  function noted(): Book {
+    return {
       ...book(),
-      chapters: [appendPrompt(book().chapters[0], "Cap it at two seconds.")],
+      chapters: [{ ...book().chapters[0], notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true }] }],
     };
-    const next = applyEvent(seeded, {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "usr_1", type: "text", text: "Cap it at two seconds." },
-      },
-    });
-    expect(next.chapters[0].blocks).toHaveLength(1);
-    expect(next.chapters[0].blocks[0].id).toBe("usr_1");
-    expect(next.chapters[0].blocks[0].voice).toBe("ink");
-  });
+  }
+  const text = (type: string, fields: Record<string, unknown>) => ev(type, { assistantMessageID: "m2", ordinal: 0, ...fields });
 
-  it("drops deltas for reasoning parts that announced themselves", () => {
-    let next = applyEvent(book(), {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "r1", type: "reasoning", text: "" },
-      },
-    });
-    next = applyEvent(next, {
-      type: "message.part.delta",
-      properties: { sessionID: "ses_1", messageID: "m1", partID: "r1", field: "text", delta: "The user wants" },
-    });
-    next = applyEvent(next, {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "r1", type: "reasoning", text: "The user wants a sentence." },
-      },
-    });
-    expect(next.chapters[0].blocks).toHaveLength(0);
-    next = applyEvent(next, {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "p1", type: "step-start", snapshot: "abc" },
-      },
-    });
-    next = applyEvent(next, {
-      type: "message.part.delta",
-      properties: { sessionID: "ses_1", partID: "t9", field: "text", delta: "Unknown part, kept as text." },
-    });
-    expect(next.chapters[0].blocks).toHaveLength(1);
-  });
-
-  it("keeps a margin note open through the empty echo and closes it with the full reply", () => {
-    const seeded = {
-      ...book(),
-      chapters: [
-        {
-          ...book().chapters[0],
-          notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true }],
-        },
-      ],
-    };
-    // The reply block is announced empty before it streams.
-    let next = applyEvent(seeded, {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "ans_1", type: "text", text: "", messageID: "m2" },
-      },
-    });
+  it("keeps a note open through the empty start and closes it with the full reply", () => {
+    let next = applyEvent(noted(), text("session.text.started", {}));
+    expect(next.chapters[0].blocks[0]).toMatchObject({ id: "m2:t0", marginal: true, text: "" });
     expect(next.chapters[0].notes[0].pending).toBe(true);
     expect(next.chapters[0].notes[0].reply).toBeUndefined();
-    next = applyEvent(next, {
-      type: "message.part.delta",
-      properties: { sessionID: "ses_1", partID: "ans_1", field: "text", delta: "It mirrors " },
-    });
-    expect(next.chapters[0].notes[0].reply).toBe("It mirrors ");
-    expect(next.chapters[0].notes[0].pending).toBe(true);
-    next = applyEvent(next, {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "ans_1", type: "text", text: "It mirrors the shape of greet." },
-      },
-    });
+    next = applyEvent(next, text("session.text.delta", { delta: "It mirrors " }));
+    expect(next.chapters[0].notes[0]).toMatchObject({ pending: true, reply: "It mirrors " });
+    next = applyEvent(next, text("session.text.ended", { text: "It mirrors the shape of greet." }));
+    expect(next.chapters[0].notes[0]).toMatchObject({ pending: false, reply: "It mirrors the shape of greet." });
+  });
+
+  it("does not let reasoning take a pending note", () => {
+    let next = applyEvent(noted(), text("session.reasoning.started", {}));
+    next = applyEvent(next, text("session.reasoning.delta", { delta: "Thinking about the quote." }));
+    expect(next.chapters[0].notes[0].reply).toBeUndefined();
+    expect(next.chapters[0].blocks).toHaveLength(0);
+  });
+
+  it("closes a note still waiting when the run ends", () => {
+    const next = applyEvent(noted(), ev("session.execution.succeeded"));
     expect(next.chapters[0].notes[0].pending).toBe(false);
-    expect(next.chapters[0].notes[0].reply).toBe("It mirrors the shape of greet.");
-  });
-
-  it("does not let reasoning deltas take a pending margin note", () => {
-    const seeded = {
-      ...book(),
-      chapters: [
-        {
-          ...book().chapters[0],
-          notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true }],
-        },
-      ],
-    };
-    let next = applyEvent(seeded, {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "r1", type: "reasoning", text: "" },
-      },
-    });
-    next = applyEvent(next, {
-      type: "message.part.delta",
-      properties: { sessionID: "ses_1", partID: "r1", field: "text", delta: "Thinking about the quote." },
-    });
-    expect(next.chapters[0].notes[0].reply).toBeUndefined();
-    expect(next.chapters[0].blocks).toHaveLength(0);
+    expect(next.chapters[0].busy).toBe(false);
   });
 });
 
@@ -234,24 +430,25 @@ describe("quill", () => {
 
 describe("sse", () => {
   it("parses complete frames and holds a partial one", () => {
-    const first = pushSse("", 'data: {"type":"server.connected","properties":{}}\n\n');
-    expect(first.events).toEqual([{ type: "server.connected", properties: {} }]);
-    const partial = pushSse("", 'data: {"type":"session.idle"');
+    const first = pushSse("", 'data: {"id":"evt_1","type":"server.connected","data":{}}\n\n: heartbeat\n\n');
+    expect(first.events).toEqual([{ id: "evt_1", type: "server.connected", data: {} }]);
+    const partial = pushSse("", 'data: {"type":"session.execution.started"');
     expect(partial.events).toEqual([]);
-    const done = pushSse(partial.rest, '}\n\n');
-    expect(done.events).toEqual([{ type: "session.idle" }]);
+    const done = pushSse(partial.rest, ',"data":{"sessionID":"ses_1"}}\n\n');
+    expect(done.events).toEqual([{ type: "session.execution.started", data: { sessionID: "ses_1" } }]);
   });
 
-  it("unwraps the payload envelope used by opencode 1.19", () => {
+  it("unwraps an opencode 2.0 frame to its type, data and location", () => {
     const frame = pushSse(
       "",
-      'data: {"payload":{"id":"evt_1","type":"message.part.delta","properties":{"sessionID":"ses_1","delta":"Hi"}}}\n\n',
+      'data: {"id":"evt_1","created":1,"type":"session.text.delta","location":{"directory":"/r"},"data":{"sessionID":"ses_1","delta":"Hi"},"durable":{"seq":3}}\n\n',
     );
     expect(unwrapEvent(frame.events[0])).toEqual({
-      type: "message.part.delta",
-      properties: { sessionID: "ses_1", delta: "Hi" },
+      type: "session.text.delta",
+      data: { sessionID: "ses_1", delta: "Hi" },
+      location: { directory: "/r" },
     });
-    expect(unwrapEvent({ type: "server.connected", properties: {} }).type).toBe("server.connected");
+    expect(unwrapEvent({ type: "server.connected", data: {} })).toEqual({ type: "server.connected", data: {} });
   });
 });
 
@@ -277,43 +474,40 @@ describe("page turns", () => {
 });
 
 describe("footnote anchors", () => {
-  function tool(status: string) {
-    return {
-      type: "message.part.updated",
-      properties: {
-        sessionID: "ses_1",
-        part: { id: "tool1", type: "tool", tool: "bash", state: { status, input: { command: "npm test" } } },
-      },
-    };
+  const AID = "msg_a";
+  function tool(status: "running" | "completed"): Frame[] {
+    if (status === "completed") return [ev("session.tool.success", { assistantMessageID: AID, id: "call-1", content: [] })];
+    return [
+      ev("session.tool.input.started", { assistantMessageID: AID, id: "call-1", name: "shell" }),
+      ev("session.tool.called", { assistantMessageID: AID, id: "call-1", input: { command: "npm test" } }),
+    ];
   }
-  function delta(partID: string, text: string) {
-    return {
-      type: "message.part.delta",
-      properties: { sessionID: "ses_1", partID, field: "text", delta: text },
-    };
+  function delta(ordinal: number, text: string): Frame {
+    return ev("session.text.delta", { assistantMessageID: AID, ordinal, delta: text });
   }
 
   it("anchors at the last finished sentence and stays there while the text grows", () => {
-    let next = applyEvent(book(), delta("p1", "I reordered the setup. Then I ra"));
-    next = applyEvent(next, tool("running"));
-    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "p1", offset: "I reordered the setup.".length });
-    next = applyEvent(next, delta("p1", "n the suite again. It passed."));
-    next = applyEvent(next, tool("completed"));
+    let next = applyEvent(book(), delta(0, "I reordered the setup. Then I ra"));
+    next = play(next, tool("running"));
+    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "msg_a:t0", offset: "I reordered the setup.".length });
+    next = applyEvent(next, delta(0, "n the suite again. It passed."));
+    next = play(next, tool("completed"));
     expect(next.chapters[0].footnotes[0]).toMatchObject({
-      blockId: "p1",
+      blockId: "msg_a:t0",
       offset: "I reordered the setup.".length,
       pending: false,
+      text: "Ran npm test.",
     });
   });
 
   it("holds a tool that comes before any text until the next text part adopts it", () => {
-    let next = applyEvent(book(), tool("running"));
+    let next = play(book(), tool("running"));
     expect(next.chapters[0].footnotes[0].blockId).toBe("pending");
-    next = applyEvent(next, delta("p2", "The suite ran clean."));
-    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "p2", offset: 0 });
-    next = applyEvent(next, delta("p2", " Twice."));
-    next = applyEvent(next, tool("completed"));
-    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "p2", offset: 0 });
+    next = applyEvent(next, delta(1, "The suite ran clean."));
+    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "msg_a:t1", offset: 0 });
+    next = applyEvent(next, delta(1, " Twice."));
+    next = play(next, tool("completed"));
+    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "msg_a:t1", offset: 0 });
   });
 });
 

@@ -1,0 +1,140 @@
+import { parsePatch, plateLines } from "./diff";
+import type { Chapter, Plate, PlateLine, ToolCall } from "./model";
+
+/** A changed file as opencode 2.0 reports it, in tool metadata and in the session diff. */
+export type FileDiff = { file: string; patch?: string; status?: string; additions?: number; deletions?: number };
+
+/** The `files[]` of a tool's or a permission's metadata. */
+export function filesOf(metadata: unknown): FileDiff[] {
+  const files = recordOf(metadata)?.files;
+  return Array.isArray(files) ? files.map(fileDiffOf).filter((f): f is FileDiff => Boolean(f)) : [];
+}
+
+/**
+ * The plate of an edit or write. Its lines come from the tool's patch once it
+ * has one, and from the edit's own strings until then, so it is never empty.
+ */
+export function toolPlate(
+  plates: Plate[],
+  id: string,
+  call: ToolCall,
+  files: FileDiff[],
+  turnMessageId: string | undefined,
+): { plates: Plate[]; plate?: Plate } {
+  const existing = plates.find((p) => p.id === id);
+  const path = firstString(call.input, ["path", "filePath", "file", "file_path"]);
+  const entry = files.find((f) => f.file === path && f.patch) ?? files.find((f) => f.patch);
+  let lines: PlateLine[];
+  let additions: number;
+  let deletions: number;
+  if (entry?.patch) {
+    lines = parsePatch(entry.patch);
+    additions = entry.additions ?? count(lines, "add");
+    deletions = entry.deletions ?? count(lines, "del");
+  } else {
+    const before = firstString(call.input, ["oldString", "old_string"]) ?? "";
+    const after = firstString(call.input, ["newString", "new_string", "content"]) ?? "";
+    if (!before && !after) return { plates, plate: existing };
+    const full = plateLines(before, after, { context: 1, maxLines: Infinity });
+    lines = plateLines(before, after, { context: 1, maxLines: 41 });
+    additions = count(full, "add");
+    deletions = count(full, "del");
+  }
+  if (!lines.length) return { plates, plate: existing };
+  const file = entry?.file ?? path ?? "the file";
+  const plate: Plate = {
+    id,
+    n: existing?.n ?? plates.length + 1,
+    messageId: call.messageId,
+    turnMessageId: existing?.turnMessageId ?? turnMessageId,
+    file,
+    title: basename(file),
+    caption: captionFor(entry?.status, file),
+    lines,
+    additions,
+    deletions,
+    status: existing?.status ?? "open",
+    folded: existing?.folded ?? false,
+  };
+  return { plates: existing ? plates.map((p) => (p.id === id ? plate : p)) : [...plates, plate], plate };
+}
+
+/** A declined edit never happened; take its plate away if it is the latest. */
+export function dropPlate(plates: Plate[], id: string): Plate[] {
+  const plate = plates.find((p) => p.id === id);
+  if (!plate || plates.some((p) => p.n > plate.n)) return plates;
+  return plates.filter((p) => p.id !== id);
+}
+
+/**
+ * Set plates from the session diff (`GET /api/session/{id}/diff`), one per
+ * file. A file that already has a plate keeps its number, status and fold.
+ */
+export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string | undefined): Chapter {
+  if (!Array.isArray(raw)) return chapter;
+  let plates = chapter.plates;
+  for (const item of raw) {
+    const diff = fileDiffOf(item);
+    if (!diff) continue;
+    const id = `diff-${diff.file}`;
+    const lines = diff.patch ? parsePatch(diff.patch) : [];
+    const existing = plates.find((p) => p.id === id) ?? plates.filter((p) => p.file === diff.file).pop();
+    if (!existing && !lines.length) continue;
+    const plate: Plate = {
+      id: existing?.id ?? id,
+      n: existing?.n ?? plates.length + 1,
+      messageId: existing?.messageId,
+      turnMessageId: existing ? existing.turnMessageId : turnMessageId,
+      file: diff.file,
+      title: existing?.title ?? basename(diff.file),
+      caption: captionFor(diff.status, diff.file),
+      lines: lines.length ? lines : existing!.lines,
+      additions: diff.additions ?? existing?.additions ?? count(lines, "add"),
+      deletions: diff.deletions ?? existing?.deletions ?? count(lines, "del"),
+      status: existing?.status ?? "open",
+      folded: existing?.folded ?? false,
+    };
+    plates = existing ? plates.map((p) => (p.id === existing.id ? plate : p)) : [...plates, plate];
+  }
+  return { ...chapter, plates, diffStale: false };
+}
+
+function captionFor(status: string | undefined, file: string): string {
+  if (status === "added") return `New file ${file}.`;
+  if (status === "deleted") return `Removed ${file}.`;
+  return `The change in ${file}.`;
+}
+
+function fileDiffOf(raw: unknown): FileDiff | undefined {
+  const item = recordOf(raw);
+  const file = typeof item?.file === "string" ? item.file : undefined;
+  if (!item || !file) return undefined;
+  return {
+    file,
+    patch: typeof item.patch === "string" ? item.patch : undefined,
+    status: typeof item.status === "string" ? item.status : undefined,
+    additions: typeof item.additions === "number" ? item.additions : undefined,
+    deletions: typeof item.deletions === "number" ? item.deletions : undefined,
+  };
+}
+
+function basename(file: string): string {
+  return file.split("/").pop() || file;
+}
+
+function count(lines: PlateLine[], kind: PlateLine["kind"]): number {
+  return lines.filter((line) => line.kind === kind).length;
+}
+
+function firstString(input: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!input) return undefined;
+  for (const key of keys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}

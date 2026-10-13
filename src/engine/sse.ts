@@ -20,14 +20,28 @@ export function pushSse(buffer: string, chunk: string): { events: unknown[]; res
   return { events, rest };
 }
 
-/** opencode 1.19 wraps each event as `{ payload: { type, properties } }`. Older frames are flat. */
-export function unwrapEvent(event: unknown): { type?: string; properties?: Record<string, unknown> } {
-  if (!event || typeof event !== "object") return {};
-  const record = event as { type?: string; properties?: Record<string, unknown>; payload?: unknown };
-  const payload = record.payload;
-  if (payload && typeof payload === "object") {
-    const inner = payload as { type?: string; properties?: Record<string, unknown> };
-    if (typeof inner.type === "string") return { type: inner.type, properties: inner.properties ?? {} };
+/** One event as the reducer reads it. */
+export type EventFrame = {
+  type?: string;
+  data?: Record<string, unknown>;
+  location?: Record<string, unknown>;
+  properties?: Record<string, unknown>;
+};
+
+/**
+ * opencode 2.0 frames are `{id, created?, type, location?, data, durable?}`;
+ * this keeps the type, data and location. Frames without `data` (opencode 1.x,
+ * which the client still reads until it moves to 2.0) keep their properties.
+ */
+export function unwrapEvent(event: unknown): EventFrame {
+  if (!isRecord(event)) return {};
+  const type = typeof event.type === "string" ? event.type : undefined;
+  if (isRecord(event.data)) {
+    return isRecord(event.location) ? { type, data: event.data, location: event.location } : { type, data: event.data };
   }
-  return { type: record.type, properties: record.properties };
+  return { type, properties: isRecord(event.properties) ? event.properties : undefined };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
