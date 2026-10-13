@@ -1,6 +1,6 @@
 import type { Chapter, Flow, Footnote } from "./model";
 import { toProse, type ItalicRange } from "./emphasis";
-import { wrapParagraph, type Measure, type WrappedLine } from "./wrap";
+import { wrapParagraphCached, type Measure, type WrappedLine } from "./wrap";
 
 export type LaidLine = WrappedLine & {
   blockId: string;
@@ -77,7 +77,7 @@ export function paginateChapter(
       if (paragraphIndex > 0) pushGap(item.id, item.voice);
       const useDrop = item.dropCap && !dropUsed && item.voice === "prose" && paragraphIndex === 0;
       if (useDrop) dropUsed = true;
-      const wrapped = wrapParagraph({
+      const wrapped = wrapParagraphCached({
         text: paragraph.text,
         italics: shiftItalics(parsed.italics, paragraph.start, paragraph.text.length),
         measure: item.voice === "ink" ? inkMeasure : measure,

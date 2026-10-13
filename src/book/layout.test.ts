@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { paginateChapter } from "./paginate";
+import { committedPrefix, paginateChapter, type LaidLine, type LaidPage } from "./paginate";
 import { sampleBook, SAMPLE_BREAKS } from "./sample";
 import { revealNextLine, wrapParagraph } from "./wrap";
 import type { Chapter } from "./model";
@@ -90,5 +90,74 @@ describe("wrap", () => {
     const lines = wrapParagraph({ text: "Hello there friend", measure, width: 12 });
     expect(lines[lines.length - 1].justify).toBe(false);
     expect(lines.slice(0, -1).every((line) => line.justify)).toBe(true);
+  });
+});
+
+describe("streaming stability", () => {
+  const opts = { measure, width: 40, linesPerPage: 6, dropLines: 3, dropWidth: 4 };
+  const words = Array.from({ length: 120 }, (_, i) => `word${i}${i % 9 === 8 ? "." : ""}`);
+
+  function streaming(tail: string): Chapter {
+    return {
+      ...chapter(""),
+      blocks: [
+        { id: "a", voice: "prose", text: "The test failed only on the build server, and nowhere else." },
+        { id: "q", voice: "ink", text: "Why only there?" },
+        { id: "b", voice: "prose", text: tail },
+      ],
+      footnotes: [{ id: "f", n: 1, blockId: "a", offset: 20, text: "Ran the suite." }],
+    };
+  }
+
+  function flat(pages: LaidPage[]): LaidLine[] {
+    return pages.flatMap((page) => page.lines);
+  }
+
+  it("never moves a laid line or page while the last block grows word by word", () => {
+    // Deltas split words, as the press does: "wor" then "d12".
+    const deltas: string[] = [];
+    words.forEach((word, i) => {
+      const lead = i === 0 ? "" : i === 60 ? "\n\n" : " ";
+      deltas.push(lead + word.slice(0, 3), word.slice(3));
+    });
+    let text = "";
+    let before = paginateChapter(streaming(text), opts);
+    for (const delta of deltas) {
+      text += delta;
+      const after = paginateChapter(streaming(text), opts);
+      expect(after.length).toBeGreaterThanOrEqual(before.length);
+      expect(committedPrefix(before, after)).toBe(Math.max(0, before.length - 1));
+      const old = flat(before);
+      const now = flat(after);
+      old.slice(0, -1).forEach((line, i) => expect(now[i]).toEqual(line));
+      before = after;
+    }
+    expect(before.length).toBeGreaterThan(3);
+  });
+
+  it("does not wrap earlier blocks again when only the tail grows", () => {
+    const seen: string[] = [];
+    const counting = (text: string) => {
+      seen.push(text);
+      return text.length;
+    };
+    const tail = words.slice(0, 30).join(" ");
+    paginateChapter(streaming(tail), { ...opts, measure: counting });
+    seen.length = 0;
+    paginateChapter(streaming(`${tail} ${words[30]}`), { ...opts, measure: counting });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.some((text) => text.includes("build server") || text.includes("only there"))).toBe(false);
+  });
+
+  it("keeps cached lines clean when a footnote hangs on them", () => {
+    const text = "Alpha beta gamma delta epsilon zeta eta theta.";
+    const withNote = {
+      ...chapter(text),
+      footnotes: [{ id: "f", n: 1, blockId: "b", offset: 9999, text: "Ran the suite." }],
+    };
+    const noted = paginateChapter(withNote, opts);
+    expect(noted.flatMap((p) => p.lines).some((line) => line.notes.includes(1))).toBe(true);
+    const plain = paginateChapter(chapter(text), opts);
+    expect(plain.flatMap((p) => p.lines).every((line) => line.notes.length === 0)).toBe(true);
   });
 });

@@ -91,6 +91,39 @@ export function wrapParagraph(opts: {
   return lines;
 }
 
+type WrapOptions = Parameters<typeof wrapParagraph>[0];
+
+/** Enough paragraphs for a long book; the oldest unused ones go first. */
+const CACHE_LIMIT = 10_000;
+const wrapCache = new WeakMap<Measure, Map<string, WrappedLine[]>>();
+
+/**
+ * wrapParagraph, remembered per measure function. While the press streams,
+ * every paragraph but the growing one is found here, so earlier lines are
+ * reused rather than measured again. Callers get their own copies.
+ */
+export function wrapParagraphCached(opts: WrapOptions): WrappedLine[] {
+  let cache = wrapCache.get(opts.measure);
+  if (!cache) {
+    cache = new Map();
+    wrapCache.set(opts.measure, cache);
+  }
+  const key = JSON.stringify([opts.width, opts.drop ?? null, opts.italics ?? [], opts.marks ?? [], opts.text]);
+  let lines = cache.get(key);
+  if (lines) {
+    cache.delete(key);
+  } else {
+    lines = wrapParagraph(opts);
+    if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+  }
+  cache.set(key, lines);
+  return lines.map(copyLine);
+}
+
+function copyLine(line: WrappedLine): WrappedLine {
+  return { ...line, notes: [...line.notes], plates: [...line.plates], italics: line.italics.map(([a, b]) => [a, b]) };
+}
+
 function cursorAt(body: string, wordIndex: number, words: string[]): number {
   let cursor = 0;
   for (let i = 0; i < wordIndex; i++) {
