@@ -8,7 +8,7 @@ import { EngineClient, PRESS_SYSTEM, type EngineAuth } from "../engine/client";
 import { coalesce } from "../engine/coalesce";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, initialNav, reduceNav, type Nav } from "./nav";
-import { SCALES, inkFont, proseFont } from "../ui/scales";
+import { DEFAULT_SCALE_INDEX, SCALES, inkFont, proseFont } from "../ui/scales";
 import { FIRST_PAGE, FIRST_PAGE_ID, keyProviders, modelSummary, type PressPhase } from "../welcome/copy";
 
 export type EngineState = "off" | "connecting" | "ready" | "error";
@@ -31,7 +31,7 @@ export function useFolio() {
   const [savingKey, setSavingKey] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [selection, setSelection] = useState<string | null>(null);
-  const [scaleIndex, setScaleIndex] = useState(1);
+  const [scaleIndex, setScaleIndex] = useState(DEFAULT_SCALE_INDEX);
   const [askBeforeWrite, setAskBeforeWrite] = useState(false);
   const [engineState, setEngineState] = useState<EngineState>("off");
   const [engineVersion, setEngineVersion] = useState<string | null>(null);
@@ -49,7 +49,7 @@ export function useFolio() {
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<number | null>(null);
   const jumpRef = useRef<string | null>(null);
-  const scale = SCALES[scaleIndex] ?? SCALES[1];
+  const scale = SCALES[scaleIndex] ?? SCALES[DEFAULT_SCALE_INDEX];
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
