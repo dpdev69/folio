@@ -92,3 +92,53 @@ function withContext(rows: Row[], context: number): Row[] {
   });
   return out;
 }
+
+const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * Plate lines from a unified diff: a git patch (`diff --git`) or a tool patch
+ * (`Index:`). Headers are skipped, hunks are separated by an ellipsis, and the
+ * plate is capped at `maxLines`, its last line an ellipsis when cut short.
+ */
+export function parsePatch(patch: string, opts?: { maxLines?: number }): PlateLine[] {
+  const maxLines = opts?.maxLines ?? 42;
+  const lines: PlateLine[] = [];
+  let oldNo = 0;
+  let newNo = 0;
+  let oldLeft = 0;
+  let newLeft = 0;
+  for (const raw of patch.replace(/\r\n/g, "\n").split("\n")) {
+    if (oldLeft <= 0 && newLeft <= 0) {
+      // Outside a hunk only a hunk header matters; file headers are skipped.
+      const hunk = HUNK.exec(raw);
+      if (!hunk) continue;
+      if (lines.length) lines.push({ kind: "context", text: "…" });
+      oldNo = Number(hunk[1]);
+      oldLeft = hunk[2] === undefined ? 1 : Number(hunk[2]);
+      newNo = Number(hunk[3]);
+      newLeft = hunk[4] === undefined ? 1 : Number(hunk[4]);
+      continue;
+    }
+    const mark = raw[0];
+    const text = raw.slice(1);
+    if (mark === "\\") continue;
+    if (mark === "-") {
+      lines.push({ kind: "del", text, oldNo });
+      oldNo += 1;
+      oldLeft -= 1;
+    } else if (mark === "+") {
+      lines.push({ kind: "add", text, newNo });
+      newNo += 1;
+      newLeft -= 1;
+    } else {
+      // A context line; some tools trim the lone space from an empty one.
+      lines.push({ kind: "context", text, oldNo, newNo });
+      oldNo += 1;
+      newNo += 1;
+      oldLeft -= 1;
+      newLeft -= 1;
+    }
+  }
+  if (lines.length <= maxLines) return lines;
+  return [...lines.slice(0, maxLines - 1), { kind: "context", text: "…" }];
+}
