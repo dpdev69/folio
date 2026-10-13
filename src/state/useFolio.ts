@@ -5,6 +5,7 @@ import { chapterRoman, displayTitle, isUntitled, type Book, type Chapter, type P
 import { SAMPLE_BREAKS, SAMPLE_DRAFT, sampleBook, sampleNoteReply, sampleReply } from "../book/sample";
 import { revealNextLine, type Measure } from "../book/wrap";
 import { EngineClient, PRESS_SYSTEM, type EngineAuth } from "../engine/client";
+import { coalesce } from "../engine/coalesce";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { initialNav, reduceNav, type Nav } from "./nav";
 import { SCALES, inkFont, proseFont } from "../ui/scales";
@@ -219,12 +220,20 @@ export function useFolio() {
       }
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+      // Many deltas arrive per frame; set them in type together, in order.
+      const events = coalesce<Parameters<typeof applyEvent>[1]>((batch) =>
+        setBook((current) => {
+          if (!current || current.sample) return current;
+          return batch.reduce((next, event) => applyEvent(next, event), current);
+        }),
+      );
+      ctrl.signal.addEventListener("abort", () => events.cancel());
       client.subscribe((event) => {
         if (event.type === "folio.stream-paused") {
           setNotice("The event stream paused. Folio will listen again.");
           return;
         }
-        setBook((current) => (current && !current.sample ? applyEvent(current, event) : current));
+        events.push(event);
       }, ctrl.signal);
       clientRef.current = client;
       setBook(ensureFirstPage(next));
