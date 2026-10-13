@@ -1,9 +1,13 @@
-use serde::Serialize;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::Mutex;
+//! The press: finds `opencode`, runs `opencode serve --stdio` for Folio with a
+//! per-launch password and Folio-owned state, and reads or writes files in the
+//! open book. The webview talks to the server itself, over HTTP with Basic auth.
+
+use serde::{Deserialize, Serialize};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
+use std::path::{Component, Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -11,6 +15,8 @@ use std::time::Duration;
 pub struct Detect {
     found: bool,
     path: Option<String>,
+    /// The sidecar shipped inside Folio, rather than one found on the machine.
+    bundled: bool,
 }
 
 #[derive(Serialize)]
@@ -19,30 +25,64 @@ pub struct Outcome {
     error: Option<String>,
 }
 
+/// A press someone else started: its url and password.
+#[derive(Deserialize)]
+pub struct AttachTo {
+    url: String,
+    password: String,
+}
+
 #[derive(Serialize)]
 pub struct Attach {
     ok: bool,
-    #[serde(rename = "proxyUrl")]
-    proxy_url: Option<String>,
+    url: Option<String>,
+    password: Option<String>,
+    version: Option<String>,
+    spawned: bool,
     error: Option<String>,
 }
 
-struct Engine {
-    proxy: Option<String>,
-    /// Kept so the sidecar is not dropped when `attach` returns.
-    #[allow(dead_code)]
-    child: Option<std::process::Child>,
+#[derive(Serialize)]
+pub struct Status {
+    running: bool,
+    spawned: bool,
+    pid: Option<u32>,
 }
 
-static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
+struct Press {
+    child: Child,
+    /// Held open: `serve --stdio` exits when its stdin closes, so the press dies with Folio.
+    #[allow(dead_code)]
+    stdin: Option<ChildStdin>,
+    url: String,
+    password: String,
+}
+
+static PRESS: Mutex<Option<Press>> = Mutex::new(None);
+
+const READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn detect() -> Detect {
     match find_binary() {
-        Some(path) => Detect {
+        Some((path, bundled)) => Detect {
             found: true,
             path: Some(path.display().to_string()),
+            bundled,
         },
-        None => Detect { found: false, path: None },
+        None => Detect {
+            found: false,
+            path: None,
+            bundled: false,
+        },
+    }
+}
+
+impl Outcome {
+    pub fn failed(error: &str) -> Self {
+        Outcome {
+            ok: false,
+            error: Some(error.to_string()),
+        }
     }
 }
 
@@ -63,262 +103,369 @@ pub fn install() -> Outcome {
     }
 }
 
-pub fn attach(directory: Option<String>, password: Option<String>) -> Attach {
-    let mut guard = ENGINE.lock().expect("engine lock");
-    if let Some(engine) = guard.as_ref() {
-        if let Some(url) = &engine.proxy {
-            return Attach {
-                ok: true,
-                proxy_url: Some(url.clone()),
-                error: None,
-            };
-        }
-    }
-
-    if !port_open(4096) {
-        let Some(binary) = find_binary() else {
-            return Attach {
-                ok: false,
-                proxy_url: None,
-                error: Some("opencode is not installed.".into()),
-            };
+/// Attach to `attach` if given, else to Folio's own press, starting it once.
+pub fn attach(data_dir: PathBuf, directory: Option<String>, attach: Option<AttachTo>) -> Attach {
+    if let Some(target) = attach {
+        return match probe(&target.url, &target.password) {
+            Ok(version) => Attach::ready(target.url, target.password, version, false),
+            Err(error) => Attach::failed(error),
         };
-        let mut command = Command::new(binary);
-        command
-            .args(["serve", "--hostname", "127.0.0.1", "--port", "4096", "--cors", "http://tauri.localhost", "--cors", "tauri://localhost"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Some(dir) = directory.filter(|value| !value.is_empty()) {
-            command.current_dir(dir);
-        }
-        if let Some(password) = password.as_deref().filter(|value| !value.is_empty()) {
-            command.env("OPENCODE_SERVER_PASSWORD", password);
-            command.env("OPENCODE_SERVER_USERNAME", "opencode");
-        }
-        match command.spawn() {
-            Ok(child) => {
-                *guard = Some(Engine {
-                    proxy: None,
-                    child: Some(child),
-                });
-            }
-            Err(error) => {
-                return Attach {
-                    ok: false,
-                    proxy_url: None,
-                    error: Some(error.to_string()),
-                };
-            }
-        }
-        drop(guard);
-        if !wait_port(4096) {
-            return Attach {
-                ok: false,
-                proxy_url: None,
-                error: Some("opencode did not start listening.".into()),
-            };
-        }
-        guard = ENGINE.lock().expect("engine lock");
     }
-
-    let listener = match TcpListener::bind("127.0.0.1:0") {
-        Ok(listener) => listener,
-        Err(error) => {
-            return Attach {
-                ok: false,
-                proxy_url: None,
-                error: Some(error.to_string()),
-            };
+    let mut guard = PRESS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(press) = guard.as_mut() {
+        if matches!(press.child.try_wait(), Ok(None)) {
+            let version = probe(&press.url, &press.password).ok().flatten();
+            return Attach::ready(press.url.clone(), press.password.clone(), version, true);
         }
-    };
-    let port = listener.local_addr().map(|addr| addr.port()).unwrap_or(0);
-    let auth = password
-        .filter(|value| !value.is_empty())
-        .map(|value| basic("opencode", &value));
-    thread::spawn(move || proxy_loop(listener, auth));
-    let url = format!("http://127.0.0.1:{port}");
-    let engine = guard.get_or_insert(Engine {
-        proxy: None,
-        child: None,
-    });
-    engine.proxy = Some(url.clone());
-    Attach {
-        ok: true,
-        proxy_url: Some(url),
-        error: None,
+        *guard = None;
+    }
+    match spawn(&data_dir.join("press"), directory) {
+        Ok(press) => {
+            let version = probe(&press.url, &press.password).ok().flatten();
+            let result = Attach::ready(press.url.clone(), press.password.clone(), version, true);
+            *guard = Some(press);
+            result
+        }
+        Err(error) => Attach::failed(error),
     }
 }
 
-fn proxy_loop(listener: TcpListener, auth: Option<String>) {
-    for incoming in listener.incoming() {
-        let Ok(stream) = incoming else { continue };
-        let auth = auth.clone();
+pub fn status() -> Status {
+    let mut guard = PRESS.lock().unwrap_or_else(|e| e.into_inner());
+    match guard.as_mut() {
+        Some(press) => {
+            let running = matches!(press.child.try_wait(), Ok(None));
+            Status {
+                running,
+                spawned: true,
+                pid: running.then(|| press.child.id()),
+            }
+        }
+        None => Status {
+            running: false,
+            spawned: false,
+            pid: None,
+        },
+    }
+}
+
+/// Stop Folio's own press, if it started one.
+pub fn stop() -> Outcome {
+    let mut guard = PRESS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(mut press) = guard.take() {
+        drop(press.stdin.take());
+        let _ = press.child.kill();
+        let _ = press.child.wait();
+    }
+    Outcome { ok: true, error: None }
+}
+
+pub fn write_file(directory: &str, path: &str, content: &str) -> Outcome {
+    let result = resolve_inside(directory, path).and_then(|target| {
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&target, content).map_err(|e| e.to_string())
+    });
+    match result {
+        Ok(()) => Outcome { ok: true, error: None },
+        Err(error) => Outcome {
+            ok: false,
+            error: Some(error),
+        },
+    }
+}
+
+pub fn read_file(directory: &str, path: &str) -> Result<String, String> {
+    let target = resolve_inside(directory, path)?;
+    std::fs::read_to_string(target).map_err(|e| e.to_string())
+}
+
+impl Attach {
+    fn ready(url: String, password: String, version: Option<String>, spawned: bool) -> Self {
+        Attach {
+            ok: true,
+            url: Some(url),
+            password: Some(password),
+            version,
+            spawned,
+            error: None,
+        }
+    }
+
+    pub fn failed(error: String) -> Self {
+        Attach {
+            ok: false,
+            url: None,
+            password: None,
+            version: None,
+            spawned: false,
+            error: Some(error),
+        }
+    }
+}
+
+fn spawn(state: &Path, directory: Option<String>) -> Result<Press, String> {
+    let (binary, _) = find_binary().ok_or_else(|| "opencode is not installed.".to_string())?;
+    let password = random_password()?;
+    let mut command = Command::new(binary);
+    command
+        .args(["serve", "--stdio", "--hostname", "127.0.0.1", "--port", "0"])
+        .env("OPENCODE_SERVER_PASSWORD", &password)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Folio's press keeps its own sessions and keys; the user's config stays theirs.
+    for (key, dir) in [("XDG_DATA_HOME", "data"), ("XDG_STATE_HOME", "state"), ("XDG_CACHE_HOME", "cache")] {
+        let path = state.join(dir);
+        std::fs::create_dir_all(&path).map_err(|e| format!("The press folder could not be made: {e}"))?;
+        command.env(key, path);
+    }
+    if let Some(dir) = directory.filter(|d| Path::new(d).is_dir()) {
+        command.current_dir(dir);
+    }
+    let mut child = command.spawn().map_err(|e| format!("The press would not start: {e}"))?;
+    let stdin = child.stdin.take();
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    // Keep the last few lines of stderr for an error, and drain both pipes so the press never blocks.
+    let tail = Arc::new(Mutex::new(String::new()));
+    if let Some(stderr) = stderr {
+        let tail = Arc::clone(&tail);
         thread::spawn(move || {
-            let _ = handle_proxy(stream, auth);
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                let mut kept = tail.lock().unwrap_or_else(|e| e.into_inner());
+                kept.push_str(&line);
+                kept.push('\n');
+                if kept.len() > 2000 {
+                    let cut = kept.len() - 2000;
+                    let cut = (cut..kept.len()).find(|i| kept.is_char_boundary(*i)).unwrap_or(0);
+                    kept.drain(..cut);
+                }
+            }
         });
     }
-}
-
-fn handle_proxy(mut client: TcpStream, auth: Option<String>) -> std::io::Result<()> {
-    client.set_read_timeout(Some(Duration::from_secs(30)))?;
-    let mut header = Vec::new();
-    let mut buf = [0u8; 1024];
-    loop {
-        let n = client.read(&mut buf)?;
-        if n == 0 {
-            return Ok(());
-        }
-        header.extend_from_slice(&buf[..n]);
-        if header.windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
-        }
-        if header.len() > 64 * 1024 {
-            return Ok(());
-        }
-    }
-    let split = header.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(header.len());
-    let head = String::from_utf8_lossy(&header[..split]).to_string();
-    let mut rest = header[split + 4..].to_vec();
-    if head.starts_with("OPTIONS ") {
-        let origin = header_value(&head, "origin").unwrap_or("*".into());
-        let body = format!(
-            "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: {origin}\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\nAccess-Control-Max-Age: 600\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        );
-        client.write_all(body.as_bytes())?;
-        return Ok(());
-    }
-    let length = header_value(&head, "content-length").and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
-    while rest.len() < length {
-        let n = client.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        rest.extend_from_slice(&buf[..n]);
-    }
-    let mut upstream = TcpStream::connect("127.0.0.1:4096")?;
-    let rewritten = rewrite_request(&head, auth.as_deref());
-    upstream.write_all(rewritten.as_bytes())?;
-    upstream.write_all(&rest[..length.min(rest.len())])?;
-    let mut response = Vec::new();
-    let mut seen = false;
-    loop {
-        let n = upstream.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        response.extend_from_slice(&buf[..n]);
-        if !seen {
-            if let Some(pos) = response.windows(4).position(|w| w == b"\r\n\r\n") {
-                let origin = header_value(&head, "origin").unwrap_or("*".into());
-                let prefix = format!(
-                    "Access-Control-Allow-Origin: {origin}\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Expose-Headers: *\r\n"
-                );
-                let mut out = response[..pos].to_vec();
-                out.extend_from_slice(b"\r\n");
-                out.extend_from_slice(prefix.as_bytes());
-                out.extend_from_slice(&response[pos + 2..]);
-                client.write_all(&out)?;
-                seen = true;
-                response.clear();
+    let (ready, wait) = mpsc::channel::<String>();
+    if let Some(stdout) = stdout {
+        thread::spawn(move || {
+            let mut sent = false;
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if !sent {
+                    if let Some(url) = parse_ready(&line) {
+                        sent = ready.send(url).is_ok();
+                    }
+                }
             }
-        } else {
-            client.write_all(&response)?;
-            response.clear();
+        });
+    }
+    match wait.recv_timeout(READY_TIMEOUT) {
+        Ok(url) => Ok(Press {
+            child,
+            stdin,
+            url,
+            password,
+        }),
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            // Give the reader a moment to collect what the press said on its way out.
+            thread::sleep(Duration::from_millis(100));
+            let said = tail.lock().unwrap_or_else(|e| e.into_inner()).trim().to_string();
+            Err(if said.is_empty() {
+                "The press did not say it was ready.".into()
+            } else {
+                format!("The press did not say it was ready. It said: {said}")
+            })
         }
     }
-    if !response.is_empty() {
-        client.write_all(&response)?;
-    }
-    Ok(())
 }
 
-fn rewrite_request(head: &str, auth: Option<&str>) -> String {
-    let mut lines: Vec<String> = head.split("\r\n").map(|line| line.to_string()).collect();
-    if lines.is_empty() {
-        return head.to_string();
+/// The readiness line of `serve --stdio`: `{"url":"http://127.0.0.1:59661"}`.
+fn parse_ready(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let url = value.get("url")?.as_str()?;
+    (url.starts_with("http://") || url.starts_with("https://")).then(|| url.to_string())
+}
+
+/// `GET /api/info` with the password: the version, or a sentence saying why not.
+fn probe(url: &str, password: &str) -> Result<Option<String>, String> {
+    let unreachable = || "The press could not be reached.".to_string();
+    let rest = url.strip_prefix("http://").ok_or_else(|| "Folio attaches to a press over http on this machine.".to_string())?;
+    let host = rest.split('/').next().unwrap_or(rest);
+    let addr = host.to_socket_addrs().ok().and_then(|mut a| a.next()).ok_or_else(unreachable)?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(3)).map_err(|_| unreachable())?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let auth = base64(format!("opencode:{password}").as_bytes(), STANDARD, true);
+    let request = format!("GET /api/info HTTP/1.1\r\nHost: {host}\r\nAuthorization: Basic {auth}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).map_err(|_| unreachable())?;
+    let mut response = Vec::new();
+    let _ = stream.read_to_end(&mut response);
+    let text = String::from_utf8_lossy(&response);
+    let status = text.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok()).ok_or_else(unreachable)?;
+    match status {
+        200 => Ok(version_of(&text)),
+        401 => Err("The press wants a different password.".into()),
+        other => Err(format!("The press answered {other}.")),
     }
-    lines.retain(|line| {
-        let lower = line.to_ascii_lowercase();
-        !lower.starts_with("proxy-connection:") && !lower.starts_with("connection:")
-    });
-    if let Some(auth) = auth {
-        if !lines.iter().any(|line| line.to_ascii_lowercase().starts_with("authorization:")) {
-            lines.insert(1, format!("Authorization: {auth}"));
+}
+
+fn version_of(response: &str) -> Option<String> {
+    let body = response.split("\r\n\r\n").nth(1)?;
+    let start = body.find('{')?;
+    let end = body.rfind('}')?;
+    let value: serde_json::Value = serde_json::from_str(body.get(start..=end)?).ok()?;
+    value.get("version")?.as_str().map(str::to_string)
+}
+
+/// The sidecar beside Folio first, then `FOLIO_OPENCODE_BIN`, `~/.opencode/bin/opencode`, and `opencode` on the PATH.
+fn find_binary() -> Option<(PathBuf, bool)> {
+    let name = if cfg!(windows) { "opencode-cli.exe" } else { "opencode-cli" };
+    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
+        let sidecar = dir.join(name);
+        if sidecar.is_file() {
+            return Some((sidecar, true));
         }
     }
-    lines.insert(1, "Connection: close".into());
-    lines.push(String::new());
-    format!("{}\r\n", lines.join("\r\n"))
-}
-
-fn header_value(head: &str, name: &str) -> Option<String> {
-    let prefix = format!("{name}:");
-    head.lines().find_map(|line| {
-        let (key, value) = line.split_once(':')?;
-        if key.eq_ignore_ascii_case(prefix.trim_end_matches(':')) {
-            Some(value.trim().to_string())
-        } else {
-            None
+    if let Some(env) = std::env::var_os("FOLIO_OPENCODE_BIN") {
+        let path = PathBuf::from(env);
+        if path.is_file() {
+            return Some((path, false));
         }
-    })
+    }
+    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        let path = PathBuf::from(home).join(".opencode/bin/opencode");
+        if path.is_file() {
+            return Some((path, false));
+        }
+    }
+    let which = if cfg!(windows) { "where" } else { "which" };
+    let output = Command::new(which).arg("opencode").output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let first = text.lines().next()?.trim();
+    (output.status.success() && !first.is_empty()).then(|| (PathBuf::from(first), false))
 }
 
-fn basic(user: &str, password: &str) -> String {
-    format!("Basic {}", base64(&format!("{user}:{password}")))
+/// `path` inside the book at `directory`: relative, no `..`, and not through a link that leaves it.
+fn resolve_inside(directory: &str, path: &str) -> Result<PathBuf, String> {
+    let root = Path::new(directory);
+    if !root.is_absolute() {
+        return Err("The book's folder must be an absolute path.".into());
+    }
+    let relative = Path::new(path);
+    if path.is_empty() || !relative.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)) {
+        return Err(format!("{path} is outside the book."));
+    }
+    let target = root.join(relative);
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    // The deepest part of the path that exists must still be inside the book.
+    let mut existing = target.as_path();
+    while !existing.exists() {
+        existing = existing.parent().ok_or_else(|| format!("{path} is outside the book."))?;
+    }
+    let real = existing.canonicalize().map_err(|e| e.to_string())?;
+    if !real.starts_with(&root) {
+        return Err(format!("{path} is outside the book."));
+    }
+    Ok(target)
 }
 
-fn base64(input: &str) -> String {
-    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let bytes = input.as_bytes();
+/// 32 random bytes from the operating system, as url-safe base64 (43 characters).
+fn random_password() -> Result<String, String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|e| format!("No randomness for the press password: {e}"))?;
+    Ok(base64(&bytes, URL_SAFE, false))
+}
+
+const STANDARD: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const URL_SAFE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+fn base64(bytes: &[u8], table: &[u8; 64], pad: bool) -> String {
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(TABLE[((triple >> 18) & 63) as usize] as char);
-        out.push(TABLE[((triple >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { TABLE[((triple >> 6) & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[(triple & 63) as usize] as char } else { '=' });
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        for i in 0..=chunk.len() {
+            out.push(table[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+        if pad {
+            out.push_str(&"=".repeat(3 - chunk.len()));
+        }
     }
     out
 }
 
-fn find_binary() -> Option<PathBuf> {
-    if let Some(env) = std::env::var_os("FOLIO_OPENCODE_BIN") {
-        let path = PathBuf::from(env);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        let path = PathBuf::from(home).join(".opencode/bin/opencode");
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    if let Ok(output) = Command::new("which").arg("opencode").output() {
-        if output.status.success() {
-            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !text.is_empty() {
-                return Some(PathBuf::from(text));
-            }
-        }
-    }
-    None
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn port_open(port: u16) -> bool {
-    TcpStream::connect(("127.0.0.1", port)).is_ok()
-}
-
-fn wait_port(port: u16) -> bool {
-    for _ in 0..40 {
-        if port_open(port) {
-            return true;
-        }
-        thread::sleep(Duration::from_millis(250));
+    #[test]
+    fn reads_the_readiness_line() {
+        assert_eq!(parse_ready(r#"{"url":"http://127.0.0.1:59661"}"#), Some("http://127.0.0.1:59661".into()));
+        assert_eq!(parse_ready("  {\"url\":\"http://127.0.0.1:4096\"}\n"), Some("http://127.0.0.1:4096".into()));
+        assert_eq!(parse_ready("server listening on http://127.0.0.1:4096"), None);
+        assert_eq!(parse_ready(r#"{"level":"info"}"#), None);
+        assert_eq!(parse_ready(r#"{"url":"file:///etc"}"#), None);
+        assert_eq!(parse_ready(""), None);
     }
-    false
+
+    #[test]
+    fn keeps_paths_inside_the_book() {
+        let book = std::env::temp_dir().join(format!("folio-press-test-{}", std::process::id()));
+        std::fs::create_dir_all(book.join("src")).unwrap();
+        let dir = book.to_str().unwrap();
+        assert!(resolve_inside(dir, "src/greet.ts").is_ok());
+        assert!(resolve_inside(dir, "new/deep/file.txt").is_ok());
+        assert!(resolve_inside(dir, "./README.md").is_ok());
+        assert!(resolve_inside(dir, "../outside.txt").is_err());
+        assert!(resolve_inside(dir, "src/../../outside.txt").is_err());
+        assert!(resolve_inside(dir, "/etc/passwd").is_err());
+        assert!(resolve_inside(dir, "").is_err());
+        assert!(resolve_inside("relative/book", "a.txt").is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/tmp", book.join("away")).unwrap();
+            assert!(resolve_inside(dir, "away/file.txt").is_err());
+        }
+        assert!(write_file(dir, "src/greet.ts", "hello\n").ok);
+        assert_eq!(read_file(dir, "src/greet.ts").unwrap(), "hello\n");
+        assert!(!write_file(dir, "../escape.txt", "x").ok);
+        std::fs::remove_dir_all(&book).unwrap();
+    }
+
+    #[test]
+    fn makes_url_safe_passwords_and_basic_auth() {
+        let a = random_password().unwrap();
+        let b = random_password().unwrap();
+        assert_eq!(a.len(), 43);
+        assert_ne!(a, b);
+        assert!(a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert_eq!(base64(b"opencode:testpw123", STANDARD, true), "b3BlbmNvZGU6dGVzdHB3MTIz");
+        assert_eq!(base64(b"ab", STANDARD, true), "YWI=");
+        assert_eq!(base64(b"a", STANDARD, true), "YQ==");
+    }
+
+    #[test]
+    fn reads_the_version_from_an_info_answer() {
+        let answer = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"version\":\"2.0.28\",\"pid\":1}";
+        assert_eq!(version_of(answer), Some("2.0.28".into()));
+        assert_eq!(version_of("HTTP/1.1 200 OK\r\n\r\nnot json"), None);
+    }
+
+    /// Starts the real press: `FOLIO_OPENCODE_BIN=… cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn starts_and_stops_a_real_press() {
+        let state = std::env::temp_dir().join(format!("folio-press-live-{}", std::process::id()));
+        let first = attach(state.clone(), None, None);
+        assert!(first.ok, "{:?}", first.error);
+        assert!(first.version.is_some());
+        let again = attach(state.clone(), None, None);
+        assert_eq!(again.url, first.url, "a live press is reused");
+        let pid = status().pid.expect("running");
+        assert!(state.join("press/data").is_dir());
+        stop();
+        assert!(!status().running);
+        assert!(Command::new("kill").args(["-0", &pid.to_string()]).status().map(|s| !s.success()).unwrap_or(true));
+        let _ = std::fs::remove_dir_all(state);
+    }
 }
