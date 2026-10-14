@@ -86,7 +86,7 @@ npm run fetch-press -- --binary /path/to/opencode
 - Edits are applied as the press makes them unless you turn on **Ask before the press writes** in the menu. That gives chapters Folio creates from then on an `ask` rule for edits and for shell commands. The press then pauses on each one: the left page foot says, for example, "May I edit src/greet.ts?", the proposed change faces it as a plate, and the choices are **Allow once** and **No**. **No** tells the press the change was declined and the turn goes on without it.
 - There is no "Always". In opencode 2.0.28 it saves a rule for the whole project that overrides every later session's ask, so a single click would quietly turn the setting off. Folio offers only the two answers that stay within the chapter.
 - When the press asks a question of its own, it appears as a small form at the foot of the page: a choice, a line to write on, a number, a yes or no, or boxes to tick. **Send** answers, **Skip** sets the question aside. The quill hint reads "the press is waiting for your answer" meanwhile.
-- **Stop**, in the quill hint while the press is working, interrupts the turn.
+- **stop**, in the quill hint while the press is working, interrupts the turn.
 - **Model…** in the menu lists the press's models grouped by provider, the free OpenCode Zen ones first. The choice applies to the chapter in view and to chapters opened afterward. If the press's default model is no longer offered, Folio picks the first free model and says so on the title page. If a turn fails because the model is gone, a banner reads "That model is no longer offered. Choose another from the menu." and a click on it opens the list.
 - Contents lists chapters. The ribbon marks a spread. Search looks through the book.
 
@@ -94,7 +94,7 @@ npm run fetch-press -- --binary /path/to/opencode
 
 The type button at the right of the title bar opens Themes & Settings.
 
-- Text size steps through six sizes.
+- Text size steps through five sizes.
 - Light, Dark, or Automatic, which follows the system.
 - Six themes: Original, Quiet, Paper, Bold, Calm, and Focus. Each is a typeface and a palette in both appearances.
 - **Customize** sets line spacing, margins, and justified text. **Reset** puts those three back.
