@@ -8,6 +8,7 @@ import { CURL_MS, CURL_PERSPECTIVE, CURL_REDUCED_MS, EASE_PAPER, curlFrames } fr
 import { MarginaliaPage } from "./Marginalia";
 import { PageFace } from "./Page";
 import { PlatePage } from "./PlatePage";
+import { platesOnPages } from "./spreadPlates";
 
 type Folio = ReturnType<typeof useFolio>;
 
@@ -414,13 +415,7 @@ function isQuillPage(folio: Folio, page: LaidPage): boolean {
 
 /** The plates footnoted on a spread, in plate order. */
 function platesOnSpread(folio: Folio, left: LaidPage, right: LaidPage): Plate[] {
-  const ids = new Set<string>();
-  for (const page of [left, right]) {
-    for (const note of page.footnotes) if (note.plateId) ids.add(note.plateId);
-    for (const line of page.lines) for (const id of line.plates) ids.add(id);
-  }
-  const chapter = folio.book?.chapters.find((item) => item.id === left.chapterId);
-  return chapter?.plates.filter((plate) => ids.has(plate.id)) ?? [];
+  return platesOnPages(folio.book?.chapters ?? [], left, right);
 }
 
 /** The permission ask holding this plate's edit; the reducer names an edit's plate `plate-<callId>`. */

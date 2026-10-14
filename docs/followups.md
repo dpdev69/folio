@@ -6,7 +6,7 @@ Collected from the per-task and final reviews. None blocks a session; each is a 
 
 Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the README "Bundled press" section says so), and the CSP was confirmed in the packaged app (`docs/e2e.md` row 20). A new opencode version still needs its pins.
 
-- The first CI runs on the private remote (2026-10-14) found and fixed two Windows faults in `fetch-opencode.mjs` (`70f0878`, `b2caae1`: the staged binary had no `.exe`); all three desktop bundles now build. The on-demand Intel job was run the same day; see its run for the result.
+- The first CI runs on the private remote (2026-10-14) found and fixed two Windows faults in `fetch-opencode.mjs` (`70f0878`, `b2caae1`: the staged binary had no `.exe`); all three desktop bundles now build. The on-demand Intel job was run the same day and passed: the x86_64 archive verified against its pin and the Intel app and dmg bundled.
 
 ## Book
 
@@ -30,13 +30,11 @@ Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the RE
 ## Interface
 
 - The ask toggle's "the press will ask before it writes" hint reads the chapter's own rules; forms are not counted in the page foot (the foot scrolls instead).
-- `platesOnSpread` uses only the left page's chapter; option descriptions in forms appear only in the title attribute.
-- A plate whose change is only part of a larger edit has no lines, so `PlatePage` still shows "The plate is still being set." above its caption; show the caption alone there.
-- The search card stays open after a jump to a hit; the appearance menu covers the Quiet and Paper swatches while it is open.
-- Reduced motion was checked by reading the CSS, not in a browser (the tools cannot emulate it).
 - A page always gets at least 6 prose lines, so on a very short window (under about 410px tall) the page counts room the sheet does not have, and a quill page there cannot fit its quill.
 - A chapter that is not the last and ends on a left page gets no quill, because `paginateBook` labels the blank right page beside it with the next chapter's id (older than the window-sized pages).
 - The CSS mirror test (`scripts/page-css.test.mjs`) does not cover `.line`'s height, and `RUNNING_LINE`, `FOLIO_LINE` and `HINT_LINE` are estimates of the face's normal line height that no CSS states.
+- Reduced motion was verified in the browser on 2026-10-15 with Playwright emulation: turns fade without a curl, plates lay and fold without travel, the menu pops at once, and the curl is unchanged without it.
+- The appearance menu now opens in the pane above the themes and lengthens the card while open; a lighter way to keep every swatch in sight may be wanted.
 
 ## Docs
 

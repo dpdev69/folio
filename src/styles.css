@@ -332,6 +332,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .form-options button[aria-pressed="true"] { color: var(--terra); border-bottom-color: var(--terra); }
 .form-options label { display: inline-flex; align-items: center; gap: 5px; }
 .form-options input[type="checkbox"] { accent-color: var(--terra); }
+.form-option { display: inline-flex; flex-direction: column; align-items: center; }
+/* Described options stand one above another, each with its quiet line beneath. */
+.form-options.described { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 6px; }
+.form-option-desc { font-size: 13px; font-style: italic; color: var(--faint); line-height: 1.3; max-width: 30em; }
 .form-line {
   width: min(260px, 100%); border: 0; border-bottom: 1px solid var(--rule);
   background: transparent; color: var(--ink); font-size: 15px; text-align: center;
@@ -772,8 +776,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   background: var(--pop-fill); color: var(--pop-ink);
 }
 .round-btn:hover, .round-btn[aria-expanded="true"] { background: var(--pop-fill-hover); }
+/* In the pane's flow, under the round button and above the themes, so it hides no swatch. */
 .appearance-menu {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 2;
+  align-self: flex-end; margin-top: -6px;
   transform-origin: calc(100% - 18px) -6px;
   animation: pop var(--dur-fast) var(--ease-out) both;
   width: 168px; padding: 5px;
