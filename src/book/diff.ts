@@ -159,11 +159,13 @@ const FUZZ = 3;
  * return it as it was before. Each hunk's context and added lines must match
  * the file exactly, where the hunk says or up to three lines either side (an
  * edit above it may have moved it); otherwise the file has moved on and this
- * returns null rather than guess.
+ * returns null rather than guess. A file with CRLF endings keeps them.
  */
 export function reversePatch(current: string, patch: string): string | null {
   const hunks = parseHunks(patch);
   if (!hunks) return null;
+  // Patches are read with LF endings; a file kept with CRLF is written back with CRLF.
+  const eol = current.includes("\r\n") ? "\r\n" : "\n";
   const lines = current.replace(/\r\n/g, "\n").split("\n");
   // A trailing newline leaves an empty last element; keep it out of the line count.
   const trailing = lines.length > 0 && lines[lines.length - 1] === "";
@@ -188,7 +190,7 @@ export function reversePatch(current: string, patch: string): string | null {
   if (!lines.length) return "";
   // "\ No newline at end of file" after a removed line: the old file had none.
   const endsWithNewline = oldEndsBare ? false : newEndsBare ? true : trailing;
-  return lines.join("\n") + (endsWithNewline ? "\n" : "");
+  return lines.join(eol) + (endsWithNewline ? eol : "");
 }
 
 /**

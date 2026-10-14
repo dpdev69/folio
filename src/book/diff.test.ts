@@ -186,3 +186,12 @@ describe("patchSides", () => {
     expect(reversePatch("", "@@ -1,2 +0,0 @@\n-a\n-b\n\\ No newline at end of file\n")).toBe("a\nb");
   });
 });
+
+describe("reversePatch line endings", () => {
+  it("writes a file with CRLF endings back with CRLF endings", () => {
+    const patch = "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n";
+    expect(reversePatch("a\r\nB\r\nc\r\n", patch)).toBe("a\r\nb\r\nc\r\n");
+    expect(reversePatch("a\r\nB\r\nc", "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n\\ No newline at end of file\n")).toBe("a\r\nb\r\nc");
+    expect(reversePatch("a\nB\nc\n", patch)).toBe("a\nb\nc\n");
+  });
+});
