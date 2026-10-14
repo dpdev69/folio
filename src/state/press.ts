@@ -118,7 +118,7 @@ export type OpenedPress = {
  * Detect, attach, and read the press's version and default model. The free
  * `opencode` provider counts as connected, so a key is never required here.
  */
-export async function openPress(host: PressHost, target?: AttachTarget): Promise<OpenedPress> {
+export async function openPress(host: PressHost, target?: AttachTarget, chosen: ModelRef | null = null): Promise<OpenedPress> {
   const none = { client: null, models: [], providers: [], model: null };
   if (!target) {
     const detected = await host.detect();
@@ -149,7 +149,7 @@ export async function openPress(host: PressHost, target?: AttachTarget): Promise
     client.models().catch(() => []),
   ]);
   const models = offeredModels(listed);
-  const choice = defaultModelChoice(model ? { providerID: model.providerID, id: model.id } : null, models);
+  const choice = defaultModelChoice(model ? { providerID: model.providerID, id: model.id } : null, models, chosen);
   return {
     client,
     version,
@@ -169,10 +169,16 @@ export function offeredModels<M extends ModelInfo>(models: M[]): M[] {
 }
 
 /**
- * The press's default model, unless the press no longer offers it: then the
+ * The model the reader chose last time while the press still offers it, else
+ * the press's default, unless the press no longer offers that either: then the
  * first free (`opencode`) model, with a sentence for the title page.
  */
-export function defaultModelChoice(model: ModelRef | null, offered: ModelInfo[]): { model: ModelRef | null; note?: string } {
+export function defaultModelChoice(
+  model: ModelRef | null,
+  offered: ModelInfo[],
+  chosen: ModelRef | null = null,
+): { model: ModelRef | null; note?: string } {
+  if (chosen && offered.some((m) => m.providerID === chosen.providerID && m.id === chosen.id)) return { model: chosen };
   if (!model || !offered.length || offered.some((m) => m.providerID === model.providerID && m.id === model.id)) return { model };
   const free = offered.find((m) => m.providerID === "opencode");
   if (!free) return { model };
@@ -339,4 +345,36 @@ function lastInk(chapter: Chapter): string | undefined {
 
 export function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+type ModelStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+const MODEL_KEY = "folio.model";
+
+function browserStorage(): ModelStorage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The model the reader last chose from the menu, so a reload does not fall back to a model the press cannot run. */
+export function loadChosenModel(storage: ModelStorage | null = browserStorage()): ModelRef | null {
+  try {
+    const raw: unknown = JSON.parse(storage?.getItem(MODEL_KEY) ?? "null");
+    const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+    if (typeof value?.providerID !== "string" || typeof value?.id !== "string") return null;
+    return { providerID: value.providerID, id: value.id };
+  } catch {
+    return null;
+  }
+}
+
+export function saveChosenModel(model: ModelRef, storage: ModelStorage | null = browserStorage()): void {
+  try {
+    storage?.setItem(MODEL_KEY, JSON.stringify({ providerID: model.providerID, id: model.id }));
+  } catch {
+    // Without storage the choice lasts until the window closes.
+  }
 }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startReplay, type Replay } from "../../scripts/replay-press.mjs";
 import type { Book, Chapter, Plate } from "../book/model";
 import { EngineClient } from "../engine/client";
-import { CANNOT_REVERT, defaultModelChoice, loadBook, offeredModels, refreshBook, revertNote, revertPlate, turnDiff } from "./press";
+import { CANNOT_REVERT, defaultModelChoice, loadBook, loadChosenModel, offeredModels, refreshBook, revertNote, revertPlate, saveChosenModel, turnDiff } from "./press";
 
 const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
@@ -151,5 +151,49 @@ describe("the press's models", () => {
     expect(defaultModelChoice(gone, [])).toEqual({ model: gone });
     expect(defaultModelChoice(gone, [listed[0]])).toEqual({ model: gone });
     expect(defaultModelChoice(null, offeredModels(listed))).toEqual({ model: null });
+  });
+
+  it("prefers the model the reader chose last time, while the press still offers it", () => {
+    const offered = offeredModels(listed);
+    const chosen = { providerID: "anthropic", id: "claude-x" };
+    expect(defaultModelChoice({ providerID: "opencode", id: "cat-jam-free" }, offered, chosen)).toEqual({ model: chosen });
+    expect(defaultModelChoice({ providerID: "opencode", id: "exo-free" }, offered, chosen)).toEqual({ model: chosen });
+    const gone = { providerID: "opencode", id: "big-pickle" };
+    expect(defaultModelChoice({ providerID: "anthropic", id: "claude-x" }, offered, gone)).toEqual({
+      model: { providerID: "anthropic", id: "claude-x" },
+    });
+  });
+});
+
+describe("the reader's model", () => {
+  function memory() {
+    const data = new Map<string, string>();
+    return {
+      data,
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => void data.set(key, value),
+      removeItem: (key: string) => void data.delete(key),
+    };
+  }
+
+  it("is kept under folio.model and read back, and nothing breaks when storage does", () => {
+    const storage = memory();
+    expect(loadChosenModel(storage)).toBeNull();
+    saveChosenModel({ providerID: "opencode", id: "big-pickle" }, storage);
+    expect(JSON.parse(storage.data.get("folio.model")!)).toEqual({ providerID: "opencode", id: "big-pickle" });
+    expect(loadChosenModel(storage)).toEqual({ providerID: "opencode", id: "big-pickle" });
+    storage.data.set("folio.model", '{"providerID": 4}');
+    expect(loadChosenModel(storage)).toBeNull();
+    const broken = {
+      getItem: () => {
+        throw new Error("denied");
+      },
+      setItem: () => {
+        throw new Error("quota");
+      },
+      removeItem: () => undefined,
+    };
+    expect(loadChosenModel(broken)).toBeNull();
+    expect(() => saveChosenModel({ providerID: "opencode", id: "x" }, broken)).not.toThrow();
   });
 });

@@ -25,6 +25,8 @@ import {
   pressHost,
   reattachPress,
   refreshBook,
+  loadChosenModel,
+  saveChosenModel,
   revertPlate,
   turnDiff,
   type AttachTarget,
@@ -632,6 +634,7 @@ export function useFolio() {
   /** Use this model for the chapter in view, and for chapters opened from now on. */
   async function chooseModel(choice: ModelRef) {
     setModel(choice);
+    saveChosenModel(choice);
     setMenuOpen(false);
     if (notice === MODEL_GONE) setNotice(null);
     setPress((current) =>
@@ -678,7 +681,7 @@ export function useFolio() {
         setPress({ phase: "error", message: "This copy of Folio is not licensed." });
         return;
       }
-      const opened = await openPress(pressHost(), target);
+      const opened = await openPress(pressHost(), target, loadChosenModel());
       targetRef.current = target;
       if (opened.client) opened.client.onUnreachable = whenUnreachable;
       clientRef.current = opened.client;
