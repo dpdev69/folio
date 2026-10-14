@@ -757,8 +757,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   background: var(--pop-fill); color: var(--pop-ink);
 }
 .round-btn:hover, .round-btn[aria-expanded="true"] { background: var(--pop-fill-hover); }
+/* In the pane's flow, under the round button and above the themes, so it hides no swatch. */
 .appearance-menu {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 2;
+  align-self: flex-end; margin-top: -6px;
   transform-origin: calc(100% - 18px) -6px;
   animation: pop var(--dur-fast) var(--ease-out) both;
   width: 168px; padding: 5px;

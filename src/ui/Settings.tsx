@@ -80,7 +80,7 @@ export function SettingsPopover({ settings, dispatch, appearance, anchor, onClos
       tabIndex={-1}
       onKeyDown={keepKeys}
       onPointerDown={(event) => {
-        if (menuOpen && !(event.target as HTMLElement).closest(".appearance")) setMenuOpen(false);
+        if (menuOpen && !(event.target as HTMLElement).closest(".appearance, .appearance-menu")) setMenuOpen(false);
       }}
     >
       <span className="settings-caret" aria-hidden="true" />
@@ -120,18 +120,19 @@ export function SettingsPopover({ settings, dispatch, appearance, anchor, onClos
                 >
                   <current.Icon />
                 </button>
-                {menuOpen ? (
-                  <AppearanceMenu
-                    value={settings.appearance}
-                    onPick={(value) => {
-                      dispatch({ type: "appearance", appearance: value });
-                      setMenuOpen(false);
-                      menuButton.current?.focus();
-                    }}
-                  />
-                ) : null}
               </div>
             </div>
+            {/* The menu opens in the pane, above the themes, so every swatch stays in sight. */}
+            {menuOpen ? (
+              <AppearanceMenu
+                value={settings.appearance}
+                onPick={(value) => {
+                  dispatch({ type: "appearance", appearance: value });
+                  setMenuOpen(false);
+                  menuButton.current?.focus();
+                }}
+              />
+            ) : null}
             <div className="theme-grid" role="group" aria-label="Theme">
               {THEMES.map((theme) => {
                 const palette = theme[appearance];
