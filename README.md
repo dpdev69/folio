@@ -9,7 +9,7 @@ The shell is Tauri 2. The pages are React, TypeScript, and Vite. opencode is not
 Folio brings its own press. The installer carries opencode 2.0.28 as a sidecar next to the Folio executable, so there is nothing to install first.
 
 - Folio starts the sidecar with `serve --stdio` on a random local port and a password made for that launch. The window talks to it directly over HTTP. Folio holds the child's standard input open, so the press stops when Folio does.
-- The press keeps its sessions, keys, and cache under Folio's own app data folder (a `press` folder inside it; on macOS, `~/Library/Application Support/app.folio.desktop/press`). It never opens your own opencode database. Your opencode config folder stays yours.
+- The press keeps its sessions, keys, and cache under Folio's own app data folder (a `press` folder inside it; on macOS, `~/Library/Application Support/app.folio.desktop/press`). It never opens your own opencode database. Your opencode config folder stays yours. The press runs in `press/cwd` inside that folder (an app opened from Finder would otherwise run it in `/`), so the title page's model and provider questions are about no particular project; once a book is open, every location-scoped call names the book's folder.
 - The free OpenCode Zen provider counts as connected, so no key is needed to begin. The title page says which press and model it will use, for example `opencode 2.0.28 · OpenCode Zen, cat-jam-free`.
 - A key is optional. **A provider key…** in the menu (and **Use a provider key** on the title page) lists the providers that take a pasted key and stores it in the press with `POST /api/integration/{id}/connect/key`. Opencode keeps it on this machine; Folio does not keep a copy.
 - **Attach to a running press** takes an address and a password, for a server you started yourself. The title page offers it when the press is missing, wants a password, or did not answer.
@@ -30,7 +30,7 @@ npm run typecheck
 npm run dev
 ```
 
-The dev server is [http://127.0.0.1:47321](http://127.0.0.1:47321). In the browser the dev server stands in for the desktop shell: it exposes `/folio/press`, `/folio/serve`, `/folio/install`, `/folio/read`, and `/folio/write`, so the title page can find, start, and install opencode on this machine and the book can read and write files. The press it starts uses the same `serve --stdio` flags, a random password, and state under `.folio/press` in the repository, and stops when the dev server does.
+The dev server is [http://127.0.0.1:47321](http://127.0.0.1:47321). In the browser the dev server stands in for the desktop shell: it exposes `/folio/press`, `/folio/serve`, `/folio/install`, `/folio/read`, `/folio/write`, and `/folio/remove`, so the title page can find, start, and install opencode on this machine and the book can read and write files. The press it starts uses the same `serve --stdio` flags, a random password, and state under `.folio/press` in the repository (it runs in `.folio/press/cwd`), and stops when the dev server does.
 
 - `FOLIO_OPENCODE_BIN=/path/to/opencode` picks the binary the dev host runs.
 - `FOLIO_PRESS_URL` and `FOLIO_PRESS_PASSWORD` make `npm run dev` attach to a press that is already running instead of starting one.

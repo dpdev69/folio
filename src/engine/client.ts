@@ -99,15 +99,27 @@ export class EngineClient {
   /** Called when a request finds nothing answering (status 0), so the owner can start the press again. */
   onUnreachable?: () => void;
 
+  private readonly opts: EngineOptions;
+
   constructor(
     private readonly baseUrl: string,
-    private readonly opts: EngineOptions,
+    opts: EngineOptions,
   ) {
+    this.opts = { ...opts };
     this.auth = `Basic ${base64(`opencode:${opts.password}`)}`;
   }
 
   get directory(): string | undefined {
     return this.opts.directory;
+  }
+
+  /**
+   * The open book's folder, sent as `location[directory]` on location-scoped
+   * calls from now on. Before a book is open none is sent, and the press
+   * answers for its own working folder.
+   */
+  useDirectory(directory: string | undefined): void {
+    this.opts.directory = directory;
   }
 
   async info(): Promise<{ version: string }> {

@@ -318,6 +318,8 @@ export function useFolio() {
     stopStream();
     try {
       const next = withKeptPlates(await loadBook(client, folder, { askBeforeWrite, model }));
+      // Providers, models and keys are asked about for this book from now on.
+      client.useDirectory(folder);
       // Errors already in the history are old news.
       seenErrors.current = new Map(next.chapters.flatMap((c) => (c.error ? [[c.id, c.error] as const] : [])));
       listen(client);
@@ -407,6 +409,7 @@ export function useFolio() {
       clientRef.current = client;
       const current = bookRef.current;
       if (current && !current.sample) {
+        client.useDirectory(current.directory);
         const signal = listen(client);
         void resync(client, signal);
       }

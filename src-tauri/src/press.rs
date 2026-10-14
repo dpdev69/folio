@@ -240,9 +240,7 @@ fn spawn(state: &Path, directory: Option<String>) -> Result<Press, String> {
         std::fs::create_dir_all(&path).map_err(|e| format!("The press folder could not be made: {e}"))?;
         command.env(key, path);
     }
-    if let Some(dir) = directory.filter(|d| Path::new(d).is_dir()) {
-        command.current_dir(dir);
-    }
+    command.current_dir(working_dir(state, directory)?);
     let mut child = command.spawn().map_err(|e| format!("The press would not start: {e}"))?;
     let stdin = child.stdin.take();
     let stdout = child.stdout.take();
@@ -298,6 +296,18 @@ fn spawn(state: &Path, directory: Option<String>) -> Result<Press, String> {
             })
         }
     }
+}
+
+/// Where the press runs: the book's folder when one is given, else the press's own
+/// `cwd` folder under its state. A Folio opened from Finder runs in `/`, and a press
+/// started there would answer location-free calls about `/`.
+fn working_dir(state: &Path, directory: Option<String>) -> Result<PathBuf, String> {
+    if let Some(dir) = directory.map(PathBuf::from).filter(|d| d.is_dir()) {
+        return Ok(dir);
+    }
+    let own = state.join("cwd");
+    std::fs::create_dir_all(&own).map_err(|e| format!("The press folder could not be made: {e}"))?;
+    Ok(own)
 }
 
 /// The readiness line of `serve --stdio`: `{"url":"http://127.0.0.1:59661"}`.
@@ -451,6 +461,20 @@ mod tests {
         assert_eq!(read_file(dir, "src/greet.ts").unwrap(), "hello\n");
         assert!(!write_file(dir, "../escape.txt", "x").ok);
         std::fs::remove_dir_all(&book).unwrap();
+    }
+
+    /// With no book given, the press runs in its own folder, not in Folio's working directory (`/` from Finder).
+    #[test]
+    fn runs_the_press_in_its_own_folder_without_a_book() {
+        let state = std::env::temp_dir().join(format!("folio-press-cwd-{}", std::process::id()));
+        let own = working_dir(&state, None).unwrap();
+        assert_eq!(own, state.join("cwd"));
+        assert!(own.is_dir());
+        let book = state.join("book");
+        std::fs::create_dir_all(&book).unwrap();
+        assert_eq!(working_dir(&state, Some(book.display().to_string())).unwrap(), book);
+        assert_eq!(working_dir(&state, Some(state.join("missing").display().to_string())).unwrap(), state.join("cwd"));
+        std::fs::remove_dir_all(&state).unwrap();
     }
 
     /// Removing goes through the same guard as writing, and never takes a folder.

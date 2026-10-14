@@ -211,6 +211,28 @@ describe("EngineClient against the replay press", () => {
     expect(requests.at(-1)).toMatchObject({ path: "/api/integration/anthropic/connect/key", body: { key: "sk-test", label: "Folio" } });
   });
 
+  it("sends no location before a book is open, and the book's folder on every location-scoped call after", async () => {
+    const { url, requests } = await press();
+    const client = new EngineClient(url, { password: "pw" });
+    await client.models();
+    await client.providers();
+    await client.defaultModel();
+    await client.integrations();
+    expect(requests.map((r) => r.query["location[directory]"])).toEqual([undefined, undefined, undefined, undefined]);
+    client.useDirectory("/book");
+    expect(client.directory).toBe("/book");
+    await client.models();
+    await client.providers();
+    await client.defaultModel();
+    await client.integrations();
+    expect(requests.slice(4).map((r) => [r.path, r.query["location[directory]"]])).toEqual([
+      ["/api/model", "/book"],
+      ["/api/provider", "/book"],
+      ["/api/model/default", "/book"],
+      ["/api/integration", "/book"],
+    ]);
+  });
+
   it("reads files from the press and writes through the host when the press cannot", async () => {
     const { url, requests } = await press();
     const writeFile = vi.fn(async () => {});

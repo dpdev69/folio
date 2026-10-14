@@ -1,6 +1,7 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { inside, readBookFile, removeBookFile, servePress, stopPress, writeBookFile } from "./host";
 
@@ -83,7 +84,7 @@ describe("the dev press", () => {
       [
         "#!/usr/bin/env node",
         'if (process.argv.includes("--version")) { console.log("2.0.28"); process.exit(0); }',
-        "console.log(JSON.stringify({ url: `http://127.0.0.1:1/?pid=${process.pid}` }));",
+        "console.log(JSON.stringify({ url: `http://127.0.0.1:1/?pid=${process.pid}&cwd=${encodeURIComponent(process.cwd())}` }));",
         'process.stdin.resume(); process.stdin.on("end", () => process.exit(0));',
       ].join("\n"),
     );
@@ -98,6 +99,13 @@ describe("the dev press", () => {
     else process.env.FOLIO_OPENCODE_BIN = saved.bin;
     if (saved.url !== undefined) process.env.FOLIO_PRESS_URL = saved.url;
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("runs the press in its own state folder, never in whatever folder vite was started from", async () => {
+    const served = await servePress();
+    if (!served.ok) throw new Error(served.error);
+    const cwd = new URL(served.url).searchParams.get("cwd")!;
+    expect(realpathSync(cwd)).toBe(realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".folio", "press", "cwd")));
   });
 
   it("reuses a live press, and starts a new one with a new password once it has died", async () => {

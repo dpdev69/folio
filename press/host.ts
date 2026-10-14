@@ -98,7 +98,11 @@ async function start(): Promise<Running> {
     xdg[key] = path.join(STATE, dir);
     await mkdir(xdg[key], { recursive: true });
   }
+  // Location-scoped calls made before a book is open use the press's own folder, not vite's.
+  const cwd = path.join(STATE, "cwd");
+  await mkdir(cwd, { recursive: true });
   const child = spawn(binary, ["serve", "--stdio", "--hostname", "127.0.0.1", "--port", "0"], {
+    cwd,
     env: { ...process.env, ...xdg, OPENCODE_SERVER_PASSWORD: password },
     // stdin stays open: `serve --stdio` exits when it closes, so the press dies with vite.
     stdio: ["pipe", "pipe", "pipe"],
