@@ -100,14 +100,27 @@ export function pinnedVersion() {
   return version;
 }
 
-/** The version a binary reports, or null if it will not run. */
+/** What `--version` said, on either stream and whatever the exit code, kept for the error message. */
+let lastVersionOutput = "";
+
+/** The version a binary reports, or null if it will not run or names none. */
 function reportedVersion(path) {
   try {
-    const out = execFileSync(path, ["--version"], { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "ignore"] });
+    const out = execFileSync(path, ["--version"], { encoding: "utf8", timeout: 60_000, stdio: ["ignore", "pipe", "pipe"] });
+    lastVersionOutput = String(out).trim();
     return parseVersion(out);
-  } catch {
-    return null;
+  } catch (error) {
+    // A binary that prints its version and still exits non-zero (or on stderr) has still named it.
+    const said = [error?.stdout, error?.stderr].map((s) => (s ? String(s) : "")).join("\n").trim();
+    lastVersionOutput = said || String(error?.message ?? error);
+    return parseVersion(said);
   }
+}
+
+/** "no version" with what the binary actually said, so a failure on another platform explains itself. */
+function noVersion() {
+  const said = lastVersionOutput.replace(/\s+/g, " ").slice(0, 300);
+  return said ? `no version (it said: ${said})` : "no version";
 }
 
 async function install(source, destination, version) {
@@ -117,7 +130,7 @@ async function install(source, destination, version) {
   const found = reportedVersion(destination);
   if (found !== version) {
     await rm(destination, { force: true });
-    throw new Error(`Expected opencode ${version} but ${source} reports ${found ?? "no version"}.`);
+    throw new Error(`Expected opencode ${version} but ${source} reports ${found ?? noVersion()}.`);
   }
   console.error(`opencode ${version} ready at ${destination}`);
 }
@@ -234,7 +247,7 @@ async function main() {
     await chmod(staged, 0o755);
     if (runnable) {
       const reported = reportedVersion(staged);
-      if (reported !== version) throw new Error(`Expected opencode ${version} but the download reports ${reported ?? "no version"}.`);
+      if (reported !== version) throw new Error(`Expected opencode ${version} but the download reports ${reported ?? noVersion()}.`);
     } else {
       console.error(`skipping the version check: ${triple} cannot run on ${host}`);
     }
