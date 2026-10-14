@@ -112,13 +112,25 @@ export function PageFace({
             ))}
           </ol>
         )}
-        {slips.map((plate) => (
-          <p key={plate.id} className="slip">
-            <button type="button" onClick={() => onOpenPlate(plate.id)}>
-              Plate {plateRoman(plate.n)} faces this page — open it
+        {slips.length === 1 ? (
+          <p className="slip">
+            <button type="button" onClick={() => onOpenPlate(slips[0].id)}>
+              Plate {plateRoman(slips[0].n)} faces this page — open it
             </button>
           </p>
-        ))}
+        ) : slips.length > 1 ? (
+          <p className="slip">
+            Plates {listed(slips.map((plate) => plateRoman(plate.n)))} face this page — open{" "}
+            {slips.map((plate, index) => (
+              <span key={plate.id}>
+                {index ? " · " : null}
+                <button type="button" aria-label={`Open Plate ${plateRoman(plate.n)}`} onClick={() => onOpenPlate(plate.id)}>
+                  {plateRoman(plate.n)}
+                </button>
+              </span>
+            ))}
+          </p>
+        ) : null}
         {quill && (
           <div className="quill-block">
             {page.footnotes.length === 0 && (quill || !empty) ? <Ornament /> : null}
@@ -160,6 +172,11 @@ export function PageFace({
       <p className="folio-num">{number}</p>
     </article>
   );
+}
+
+/** "I and II", "I, II and III". */
+function listed(items: string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 /** A footnote's "See Plate N →" opens that plate over the right page. */

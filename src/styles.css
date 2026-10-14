@@ -280,8 +280,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .form-actions button:disabled { color: var(--faint); cursor: default; }
 
 /* A plate that faces a page of prose waits at its foot. */
-.slip { margin: 8px 0 0; padding: 6px 0 0; border-top: 1px solid var(--rule); font-size: 15px; line-height: 1.35; }
-.footnotes + .slip, .slip + .slip { margin-top: 3px; padding-top: 0; border-top: 0; }
+.slip {
+  margin: 8px 0 0; padding: 6px 0 0; border-top: 1px solid var(--rule);
+  font-size: 15px; line-height: 1.35; font-style: italic; color: var(--soft);
+}
+.footnotes + .slip { margin-top: 3px; padding-top: 0; border-top: 0; }
 .slip button, .fn-plate {
   border: 0; background: transparent; padding: 0; font-size: inherit; font-style: italic; color: var(--terra);
 }

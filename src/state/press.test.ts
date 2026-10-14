@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startReplay, type Replay } from "../../scripts/replay-press.mjs";
 import type { Book, Chapter, Plate } from "../book/model";
 import { EngineClient } from "../engine/client";
-import { CANNOT_REVERT, defaultModelChoice, loadBook, offeredModels, refreshBook, revertPlate } from "./press";
+import { CANNOT_REVERT, defaultModelChoice, loadBook, offeredModels, refreshBook, revertNote, revertPlate } from "./press";
 
 const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
@@ -46,7 +46,8 @@ describe("revertPlate", () => {
     const ch = chapter();
     await revertPlate(client, book([ch]), ch, plate({ patch: RENAME, turnMessageId: "msg_1378318cd0011en9zAGWcvx4bC" }));
     expect(written).toEqual([{ path: "src/greet.ts", content: GREET.replace("greet(", "hello(") }]);
-    expect(replay.requests.some((r) => r.path.endsWith("/synthetic"))).toBe(true);
+    const told = replay.requests.find((r) => r.path.endsWith("/synthetic"));
+    expect((told?.body as { text?: string })?.text).toBe(revertNote("src/greet.ts"));
   });
 
   it("leaves a file that has moved on as it is", async () => {

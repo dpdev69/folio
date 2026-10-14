@@ -271,6 +271,15 @@ export async function turnDiff(client: EngineClient, chapter: Chapter): Promise<
   return { type: "folio.diff", data: { sessionID: chapter.id, diff, turnMessageId: turn } };
 }
 
+/**
+ * What the model is told after a Reject. The note starts a turn of its own, so
+ * it says plainly that the change is unwanted; a bare "reverted" was read as an
+ * accident and the model made the change again.
+ */
+export function revertNote(file: string): string {
+  return `The reader rejected your change to ${file} and set the file back on purpose. Leave ${file} as it is now unless the reader asks again.`;
+}
+
 /** Said when a plate has no patch of its own to reverse. */
 export const CANNOT_REVERT = "This plate cannot be set back on its own.";
 
@@ -287,7 +296,7 @@ export async function revertPlate(client: EngineClient, book: Book, chapter: Cha
   const before = reversePatch(current, plate.patch);
   if (before === null) throw new Error(`${plate.file} has changed since this plate was set, so it was left as it is.`);
   await client.writeFile(book.directory, plate.file, before);
-  await client.synthetic(chapter.id, `The reader reverted the change to ${plate.file}.`).catch(() => {});
+  await client.synthetic(chapter.id, revertNote(plate.file)).catch(() => {});
   return turnDiff(client, chapter);
 }
 
