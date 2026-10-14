@@ -220,18 +220,23 @@ export async function turnDiff(client: EngineClient, chapter: Chapter): Promise<
   return { type: "folio.diff", data: { sessionID: chapter.id, diff, turnMessageId: turn } };
 }
 
+/** Said when a plate's own turn cannot be told apart from the rest of the session. */
+export const CANNOT_REVERT = "This plate cannot be set back on its own.";
+
 /**
  * Undo one plate's file: reverse its turn's patch for that file against the
  * file as it is now, write it back through Folio, and tell the model. Session
  * revert is not used; it would delete the chapter's history.
  */
 export async function revertPlate(client: EngineClient, book: Book, chapter: Chapter, plate: Plate): Promise<EventFrame> {
+  // The whole session's diff would also undo earlier turns, accepted ones too, so never fall back to it.
+  if (!plate.turnMessageId) throw new Error(CANNOT_REVERT);
   let diffs;
   try {
     diffs = await client.diff(chapter.id, plate.turnMessageId);
   } catch (error) {
-    if (!plate.turnMessageId || !(error instanceof EngineError) || error.status !== 400) throw error;
-    diffs = await client.diff(chapter.id);
+    if (error instanceof EngineError && error.status === 400) throw new Error(CANNOT_REVERT);
+    throw error;
   }
   const entry = diffs.find((d) => d.file === plate.file && d.patch);
   if (!entry?.patch) throw new Error(`The press has no change in ${plate.file} to undo.`);

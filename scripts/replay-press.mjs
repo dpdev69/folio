@@ -138,6 +138,10 @@ export async function startReplay({ port = 0, password = "replay", flaky = false
     }
     if ((match = /^\/api\/session\/([^/]+)\/diff$/.exec(path)) && method === "GET") {
       if (match[1] === "ses_broken") return send(res, 500, { _tag: "UnknownError", message: "The snapshot store is unreadable." });
+      // As in 2.0.28: `from` must name a user message of the session.
+      const from = url.searchParams.get("from");
+      const users = match[1] === SESSION ? messages.filter((m) => m.type === "user").map((m) => m.id) : [];
+      if (from && !users.includes(from)) return send(res, 400, { _tag: "InvalidRequestError", message: `Message ${from} is not a user message` });
       return send(res, 200, { data: match[1] === SESSION ? diff : [] });
     }
     if (/^\/api\/session\/[^/]+\/interrupt$/.test(path) && method === "POST") return send(res, 200, { interrupted: true });
