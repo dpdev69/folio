@@ -14,16 +14,19 @@ fn license_check() -> LicenseStatus {
     LicenseStatus { state: "unchecked" }
 }
 
+/// Run blocking press work off the main thread; if the helper thread dies, answer with `fallback`.
+async fn off_main<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, fallback: impl FnOnce() -> T) -> T {
+    tauri::async_runtime::spawn_blocking(work).await.unwrap_or_else(|_| fallback())
+}
+
 #[tauri::command]
-fn engine_detect() -> press::Detect {
-    press::detect()
+async fn engine_detect() -> press::Detect {
+    off_main(press::detect, press::Detect::missing).await
 }
 
 #[tauri::command]
 async fn engine_install() -> press::Outcome {
-    tauri::async_runtime::spawn_blocking(press::install)
-        .await
-        .unwrap_or_else(|_| press::Outcome::failed(HELPER_STOPPED))
+    off_main(press::install, || press::Outcome::failed(HELPER_STOPPED)).await
 }
 
 /// Attach to a running press, or start Folio's own, and return its url and password.
@@ -33,34 +36,32 @@ async fn engine_attach(app: tauri::AppHandle, directory: Option<String>, attach:
         .path()
         .app_data_dir()
         .unwrap_or_else(|_| std::env::temp_dir().join("app.folio.desktop"));
-    tauri::async_runtime::spawn_blocking(move || press::attach(data_dir, directory, attach))
-        .await
-        .unwrap_or_else(|_| press::Attach::failed(HELPER_STOPPED.into()))
+    off_main(move || press::attach(data_dir, directory, attach), || press::Attach::failed(HELPER_STOPPED.into())).await
 }
 
 #[tauri::command]
-fn engine_status() -> press::Status {
-    press::status()
+async fn engine_status() -> press::Status {
+    off_main(press::status, press::Status::unknown).await
 }
 
 #[tauri::command]
-fn engine_stop() -> press::Outcome {
-    press::stop()
+async fn engine_stop() -> press::Outcome {
+    off_main(|| press::stop(press::GRACE), || press::Outcome::failed(HELPER_STOPPED)).await
 }
 
 #[tauri::command]
-fn write_file(directory: String, path: String, content: String) -> press::Outcome {
-    press::write_file(&directory, &path, &content)
+async fn write_file(directory: String, path: String, content: String) -> press::Outcome {
+    off_main(move || press::write_file(&directory, &path, &content), || press::Outcome::failed(HELPER_STOPPED)).await
 }
 
 #[tauri::command]
-fn remove_file(directory: String, path: String) -> press::Outcome {
-    press::remove_file(&directory, &path)
+async fn remove_file(directory: String, path: String) -> press::Outcome {
+    off_main(move || press::remove_file(&directory, &path), || press::Outcome::failed(HELPER_STOPPED)).await
 }
 
 #[tauri::command]
-fn read_file(directory: String, path: String) -> Result<String, String> {
-    press::read_file(&directory, &path)
+async fn read_file(directory: String, path: String) -> Result<String, String> {
+    off_main(move || press::read_file(&directory, &path), || Err(HELPER_STOPPED.into())).await
 }
 
 const HELPER_STOPPED: &str = "The press helper stopped unexpectedly.";
@@ -82,9 +83,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Folio")
         .run(|_, event| {
-            // The press dies with Folio.
+            // The press dies with Folio: its stdin closes, it gets a short grace, then it is killed.
+            // The first of these events takes the press; the second finds nothing to stop.
             if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
-                press::stop();
+                press::stop(press::GRACE);
             }
         });
 }

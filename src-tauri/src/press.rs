@@ -1,15 +1,21 @@
 //! The press: finds `opencode`, runs `opencode serve --stdio` for Folio with a
 //! per-launch password and Folio-owned state, and reads or writes files in the
 //! open book. The webview talks to the server itself, over HTTP with Basic auth.
+//!
+//! Locking: `attaching` serializes attaches, so two at once get the same press,
+//! and it is held across the readiness wait. The slot lock is held only around
+//! changes to the recorded press, so `stop` and `status` never wait behind a
+//! press that is starting. `stop` bumps the slot's epoch; an attach that started
+//! before it shuts its new press down instead of recording it.
 
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Serialize)]
 pub struct Detect {
@@ -52,15 +58,50 @@ pub struct Status {
 struct Press {
     child: Child,
     /// Held open: `serve --stdio` exits when its stdin closes, so the press dies with Folio.
-    #[allow(dead_code)]
+    /// Closing it is also how Folio asks the press to stop.
     stdin: Option<ChildStdin>,
     url: String,
     password: String,
 }
 
-static PRESS: Mutex<Option<Press>> = Mutex::new(None);
+struct Slot {
+    press: Option<Press>,
+    /// Bumped by every stop, so an attach that was starting a press knows it was stopped.
+    epoch: u64,
+}
 
-const READY_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a probe waits to connect, and then for the answer.
+#[derive(Clone, Copy)]
+struct Patience {
+    connect: Duration,
+    read: Duration,
+}
+
+/// For a press Folio has not talked to yet: a cold one can be slow to answer.
+const FULL: Patience = Patience {
+    connect: Duration::from_secs(3),
+    read: Duration::from_secs(5),
+};
+
+/// For Folio's own press that should already be up: if it cannot answer this, it is hung.
+const HEALTH: Patience = Patience {
+    connect: Duration::from_secs(2),
+    read: Duration::from_secs(4),
+};
+
+struct Presses {
+    slot: Mutex<Slot>,
+    attaching: Mutex<()>,
+    health: Patience,
+}
+
+static PRESSES: Presses = Presses::new(HEALTH);
+
+/// A cold first launch (a fresh sidecar, an empty cache) can take a while to say it is ready.
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a stop waits for the press to leave on its own after its stdin closes.
+pub const GRACE: Duration = Duration::from_millis(1500);
 
 pub fn detect() -> Detect {
     match find_binary() {
@@ -69,11 +110,27 @@ pub fn detect() -> Detect {
             path: Some(path.display().to_string()),
             bundled,
         },
-        None => Detect {
+        None => Detect::missing(),
+    }
+}
+
+impl Detect {
+    pub fn missing() -> Self {
+        Detect {
             found: false,
             path: None,
             bundled: false,
-        },
+        }
+    }
+}
+
+impl Status {
+    pub fn unknown() -> Self {
+        Status {
+            running: false,
+            spawned: false,
+            pid: None,
+        }
     }
 }
 
@@ -106,58 +163,157 @@ pub fn install() -> Outcome {
 /// Attach to `attach` if given, else to Folio's own press, starting it once.
 pub fn attach(data_dir: PathBuf, directory: Option<String>, attach: Option<AttachTo>) -> Attach {
     if let Some(target) = attach {
-        return match probe(&target.url, &target.password) {
+        return match probe(&target.url, &target.password, FULL) {
             Ok(version) => Attach::ready(target.url, target.password, version, false),
             Err(error) => Attach::failed(error),
         };
     }
-    let mut guard = PRESS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(press) = guard.as_mut() {
-        if matches!(press.child.try_wait(), Ok(None)) {
-            let version = probe(&press.url, &press.password).ok().flatten();
-            return Attach::ready(press.url.clone(), press.password.clone(), version, true);
-        }
-        *guard = None;
-    }
-    match spawn(&data_dir.join("press"), directory) {
-        Ok(press) => {
-            let version = probe(&press.url, &press.password).ok().flatten();
-            let result = Attach::ready(press.url.clone(), press.password.clone(), version, true);
-            *guard = Some(press);
-            result
-        }
-        Err(error) => Attach::failed(error),
-    }
+    PRESSES.own(|| spawn(&data_dir.join("press"), directory))
 }
 
 pub fn status() -> Status {
-    let mut guard = PRESS.lock().unwrap_or_else(|e| e.into_inner());
-    match guard.as_mut() {
-        Some(press) => {
-            let running = matches!(press.child.try_wait(), Ok(None));
-            Status {
-                running,
-                spawned: true,
-                pid: running.then(|| press.child.id()),
+    PRESSES.status()
+}
+
+/// Stop Folio's own press, if it started one: close its stdin, wait up to `grace`, then kill.
+pub fn stop(grace: Duration) -> Outcome {
+    PRESSES.stop(grace);
+    Outcome { ok: true, error: None }
+}
+
+impl Presses {
+    const fn new(health: Patience) -> Self {
+        Presses {
+            slot: Mutex::new(Slot { press: None, epoch: 0 }),
+            attaching: Mutex::new(()),
+            health,
+        }
+    }
+
+    fn slot(&self) -> MutexGuard<'_, Slot> {
+        self.slot.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Folio's own press: the recorded one if it is alive and answers, else a new one from `start`.
+    fn own(&self, start: impl FnOnce() -> Result<Press, String>) -> Attach {
+        let _turn = self.attaching.lock().unwrap_or_else(|e| e.into_inner());
+        let (current, epoch) = {
+            let mut slot = self.slot();
+            let alive = slot.press.as_mut().map(|press| matches!(press.child.try_wait(), Ok(None)));
+            if alive == Some(false) {
+                slot.press = None;
+            }
+            let current = slot
+                .press
+                .as_ref()
+                .map(|press| (press.url.clone(), press.password.clone(), press.child.id()));
+            (current, slot.epoch)
+        };
+        if let Some((url, password, pid)) = current {
+            match probe(&url, &password, self.health) {
+                Ok(version) => {
+                    if self.slot().epoch != epoch {
+                        return Attach::failed(STOPPED.into());
+                    }
+                    return Attach::ready(url, password, version, true);
+                }
+                Err(_) => {
+                    // Alive but not answering: hung. Take it out (if it is still the one we probed) and kill it.
+                    let hung = {
+                        let mut slot = self.slot();
+                        if slot.press.as_ref().map(|p| p.child.id()) == Some(pid) {
+                            slot.press.take()
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(press) = hung {
+                        shutdown(press, Duration::ZERO);
+                    }
+                }
             }
         }
-        None => Status {
-            running: false,
-            spawned: false,
-            pid: None,
-        },
+        let press = match start() {
+            Ok(press) => press,
+            Err(error) => return Attach::failed(error),
+        };
+        let version = probe(&press.url, &press.password, FULL).ok().flatten();
+        let mut slot = self.slot();
+        if slot.epoch != epoch {
+            drop(slot);
+            shutdown(press, Duration::ZERO);
+            return Attach::failed(STOPPED.into());
+        }
+        let result = Attach::ready(press.url.clone(), press.password.clone(), version, true);
+        slot.press = Some(press);
+        result
+    }
+
+    fn status(&self) -> Status {
+        let mut slot = self.slot();
+        match slot.press.as_mut() {
+            Some(press) => {
+                let running = matches!(press.child.try_wait(), Ok(None));
+                Status {
+                    running,
+                    spawned: true,
+                    pid: running.then(|| press.child.id()),
+                }
+            }
+            None => Status::unknown(),
+        }
+    }
+
+    fn stop(&self, grace: Duration) {
+        let press = {
+            let mut slot = self.slot();
+            slot.epoch += 1;
+            slot.press.take()
+        };
+        if let Some(press) = press {
+            shutdown(press, grace);
+        }
     }
 }
 
-/// Stop Folio's own press, if it started one.
-pub fn stop() -> Outcome {
-    let mut guard = PRESS.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(mut press) = guard.take() {
-        drop(press.stdin.take());
-        let _ = press.child.kill();
-        let _ = press.child.wait();
+const STOPPED: &str = "The press was stopped while it was starting.";
+
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    Done,
+    Wait,
+    Kill,
+}
+
+/// While a press is stopping: gone is done, inside the grace period wait, after it kill.
+fn next_step(exited: bool, waited: Duration, grace: Duration) -> Step {
+    if exited {
+        Step::Done
+    } else if waited >= grace {
+        Step::Kill
+    } else {
+        Step::Wait
     }
-    Outcome { ok: true, error: None }
+}
+
+/// Close the press's stdin (`serve --stdio` treats that as "stop"), give it `grace`, then kill it.
+fn shutdown(mut press: Press, grace: Duration) {
+    drop(press.stdin.take());
+    let started = Instant::now();
+    loop {
+        let exited = match press.child.try_wait() {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(_) => break,
+        };
+        match next_step(exited, started.elapsed(), grace) {
+            Step::Done => return,
+            Step::Wait => thread::sleep(Duration::from_millis(20)),
+            Step::Kill => break,
+        }
+    }
+    let _ = press.child.kill();
+    let _ = press.child.wait();
 }
 
 pub fn write_file(directory: &str, path: &str, content: &str) -> Outcome {
@@ -248,6 +404,7 @@ fn spawn(state: &Path, directory: Option<String>) -> Result<Press, String> {
 
     // Keep the last few lines of stderr for an error, and drain both pipes so the press never blocks.
     let tail = Arc::new(Mutex::new(String::new()));
+    let (drained, stderr_done) = mpsc::channel::<()>();
     if let Some(stderr) = stderr {
         let tail = Arc::clone(&tail);
         thread::spawn(move || {
@@ -261,6 +418,7 @@ fn spawn(state: &Path, directory: Option<String>) -> Result<Press, String> {
                     kept.drain(..cut);
                 }
             }
+            let _ = drained.send(());
         });
     }
     let (ready, wait) = mpsc::channel::<String>();
@@ -283,18 +441,28 @@ fn spawn(state: &Path, directory: Option<String>) -> Result<Press, String> {
             url,
             password,
         }),
-        Err(_) => {
+        Err(reason) => {
+            let timed_out = matches!(reason, mpsc::RecvTimeoutError::Timeout);
             let _ = child.kill();
             let _ = child.wait();
-            // Give the reader a moment to collect what the press said on its way out.
-            thread::sleep(Duration::from_millis(100));
-            let said = tail.lock().unwrap_or_else(|e| e.into_inner()).trim().to_string();
-            Err(if said.is_empty() {
-                "The press did not say it was ready.".into()
-            } else {
-                format!("The press did not say it was ready. It said: {said}")
-            })
+            // Let the reader collect what the press said on its way out.
+            let _ = stderr_done.recv_timeout(Duration::from_secs(1));
+            let said = tail.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            Err(not_ready(timed_out, &said))
         }
+    }
+}
+
+/// Why a press never said it was ready, with the tail of what it wrote to stderr.
+fn not_ready(timed_out: bool, said: &str) -> String {
+    let what = if timed_out {
+        format!("The press did not say it was ready within {} seconds.", READY_TIMEOUT.as_secs())
+    } else {
+        "The press stopped before it said it was ready.".to_string()
+    };
+    match said.trim() {
+        "" => what,
+        said => format!("{what} It said: {said}"),
     }
 }
 
@@ -317,14 +485,20 @@ fn parse_ready(line: &str) -> Option<String> {
     (url.starts_with("http://") || url.starts_with("https://")).then(|| url.to_string())
 }
 
+/// The first of `addrs` that accepts a connection, trying each (IPv4 and IPv6) in turn.
+fn connect_any(addrs: impl IntoIterator<Item = SocketAddr>, timeout: Duration) -> Option<TcpStream> {
+    addrs.into_iter().find_map(|addr| TcpStream::connect_timeout(&addr, timeout).ok())
+}
+
 /// `GET /api/info` with the password: the version, or a sentence saying why not.
-fn probe(url: &str, password: &str) -> Result<Option<String>, String> {
+fn probe(url: &str, password: &str, patience: Patience) -> Result<Option<String>, String> {
     let unreachable = || "The press could not be reached.".to_string();
     let rest = url.strip_prefix("http://").ok_or_else(|| "Folio attaches to a press over http on this machine.".to_string())?;
     let host = rest.split('/').next().unwrap_or(rest);
-    let addr = host.to_socket_addrs().ok().and_then(|mut a| a.next()).ok_or_else(unreachable)?;
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(3)).map_err(|_| unreachable())?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let addrs = host.to_socket_addrs().map_err(|_| unreachable())?;
+    let mut stream = connect_any(addrs, patience.connect).ok_or_else(unreachable)?;
+    let _ = stream.set_read_timeout(Some(patience.read));
+    let _ = stream.set_write_timeout(Some(patience.read));
     let auth = base64(format!("opencode:{password}").as_bytes(), STANDARD, true);
     let request = format!("GET /api/info HTTP/1.1\r\nHost: {host}\r\nAuthorization: Basic {auth}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).map_err(|_| unreachable())?;
@@ -552,6 +726,186 @@ mod tests {
         assert_eq!(version_of("HTTP/1.1 200 OK\r\n\r\nnot json"), None);
     }
 
+    #[test]
+    fn waits_out_the_grace_period_then_kills() {
+        let grace = Duration::from_millis(1500);
+        assert_eq!(next_step(true, Duration::ZERO, grace), Step::Done);
+        assert_eq!(next_step(true, Duration::from_secs(5), grace), Step::Done);
+        assert_eq!(next_step(false, Duration::ZERO, grace), Step::Wait);
+        assert_eq!(next_step(false, Duration::from_millis(1499), grace), Step::Wait);
+        assert_eq!(next_step(false, grace, grace), Step::Kill);
+        assert_eq!(next_step(false, Duration::ZERO, Duration::ZERO), Step::Kill);
+    }
+
+    #[test]
+    fn says_why_the_press_was_not_ready() {
+        assert_eq!(not_ready(true, ""), "The press did not say it was ready within 30 seconds.");
+        assert_eq!(not_ready(false, "  \n"), "The press stopped before it said it was ready.");
+        assert_eq!(
+            not_ready(false, "Error: port in use\n"),
+            "The press stopped before it said it was ready. It said: Error: port in use"
+        );
+    }
+
+    /// Every resolved address is tried, not only the first.
+    #[test]
+    fn tries_every_address() {
+        let closed = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap()
+        };
+        let open = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let good = open.local_addr().unwrap();
+        let stream = connect_any([closed, good], Duration::from_secs(1)).expect("the second address answers");
+        assert_eq!(stream.peer_addr().unwrap(), good);
+        assert!(connect_any([closed], Duration::from_secs(1)).is_none());
+        assert!(connect_any(Vec::new(), Duration::from_secs(1)).is_none());
+        // IPv6 after a refused IPv4, when this machine has a loopback for it.
+        if let Ok(six) = std::net::TcpListener::bind("[::1]:0") {
+            let six_addr = six.local_addr().unwrap();
+            let stream = connect_any([closed, six_addr], Duration::from_secs(1)).expect("IPv6 answers");
+            assert_eq!(stream.peer_addr().unwrap(), six_addr);
+        }
+    }
+
+    /// A stand-in press that answers every `/api/info` with 200.
+    fn fake_info() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        thread::spawn(move || {
+            for mut stream in listener.incoming().map_while(Result::ok) {
+                let mut seen = Vec::new();
+                let mut byte = [0u8; 1];
+                while !seen.ends_with(b"\r\n\r\n") && stream.read(&mut byte).map(|n| n == 1).unwrap_or(false) {
+                    seen.push(byte[0]);
+                }
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"version\":\"test\"}");
+            }
+        });
+        url
+    }
+
+    fn closed_url() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+    }
+
+    /// A child that leaves when its stdin closes, standing in for `serve --stdio`.
+    #[cfg(unix)]
+    fn fake_press(url: &str) -> Press {
+        let mut child = Command::new("cat").stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap();
+        let stdin = child.stdin.take();
+        Press {
+            child,
+            stdin,
+            url: url.to_string(),
+            password: "pw".into(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn gone(pid: u32) -> bool {
+        Command::new("kill").args(["-0", &pid.to_string()]).stderr(Stdio::null()).status().map(|s| !s.success()).unwrap_or(true)
+    }
+
+    const QUICK: Patience = Patience {
+        connect: Duration::from_millis(300),
+        read: Duration::from_millis(300),
+    };
+
+    #[cfg(unix)]
+    #[test]
+    fn a_press_that_leaves_on_stdin_close_is_not_killed_late() {
+        let started = Instant::now();
+        shutdown(fake_press("http://127.0.0.1:1"), Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(2), "cat leaves as soon as stdin closes");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_press_that_ignores_stdin_is_killed_after_the_grace() {
+        let mut child = Command::new("sleep").arg("30").stdin(Stdio::piped()).spawn().unwrap();
+        let stdin = child.stdin.take();
+        let pid = child.id();
+        let press = Press { child, stdin, url: String::new(), password: String::new() };
+        let started = Instant::now();
+        shutdown(press, Duration::from_millis(300));
+        let took = started.elapsed();
+        assert!(took >= Duration::from_millis(300) && took < Duration::from_secs(3), "{took:?}");
+        assert!(gone(pid));
+    }
+
+    /// Two attaches at once get the same press, started once.
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_attaches_share_one_press() {
+        let presses = Presses::new(QUICK);
+        let url = fake_info();
+        let starts = std::sync::atomic::AtomicUsize::new(0);
+        let start = || {
+            starts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(300));
+            Ok(fake_press(&url))
+        };
+        let (a, b) = thread::scope(|s| {
+            let a = s.spawn(|| presses.own(start));
+            let b = s.spawn(|| presses.own(start));
+            (a.join().unwrap(), b.join().unwrap())
+        });
+        assert!(a.ok && b.ok, "{:?} {:?}", a.error, b.error);
+        assert_eq!(a.url, b.url);
+        assert_eq!(a.version.as_deref(), Some("test"));
+        assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 1);
+        presses.stop(GRACE);
+    }
+
+    /// Stop does not wait behind a press that is still starting, and that press is not kept.
+    #[cfg(unix)]
+    #[test]
+    fn stop_does_not_wait_behind_a_starting_press() {
+        let presses = Presses::new(QUICK);
+        let url = fake_info();
+        let pid = std::sync::atomic::AtomicU32::new(0);
+        thread::scope(|s| {
+            let starting = s.spawn(|| {
+                presses.own(|| {
+                    let press = fake_press(&url);
+                    pid.store(press.child.id(), std::sync::atomic::Ordering::SeqCst);
+                    thread::sleep(Duration::from_millis(1500));
+                    Ok(press)
+                })
+            });
+            thread::sleep(Duration::from_millis(200));
+            let asked = Instant::now();
+            presses.stop(GRACE);
+            assert!(asked.elapsed() < Duration::from_millis(500), "stop waited {:?}", asked.elapsed());
+            let result = starting.join().unwrap();
+            assert!(!result.ok);
+            assert_eq!(result.error.as_deref(), Some(STOPPED));
+        });
+        assert!(!presses.status().spawned);
+        assert!(gone(pid.load(std::sync::atomic::Ordering::SeqCst)));
+    }
+
+    /// A press that is alive but does not answer is killed and replaced.
+    #[cfg(unix)]
+    #[test]
+    fn replaces_a_hung_press() {
+        let presses = Presses::new(QUICK);
+        let hung = fake_press(&closed_url());
+        let hung_pid = hung.child.id();
+        presses.slot().press = Some(hung);
+        let url = fake_info();
+        let result = presses.own(|| Ok(fake_press(&url)));
+        assert!(result.ok, "{:?}", result.error);
+        assert_eq!(result.url.as_deref(), Some(url.as_str()));
+        assert!(gone(hung_pid));
+        // A healthy press is kept on the next attach.
+        let again = presses.own(|| Err("should not start another".into()));
+        assert_eq!(again.url.as_deref(), Some(url.as_str()));
+        presses.stop(GRACE);
+    }
+
     /// Starts the real press: `FOLIO_OPENCODE_BIN=… cargo test -- --ignored`.
     #[test]
     #[ignore]
@@ -564,9 +918,11 @@ mod tests {
         assert_eq!(again.url, first.url, "a live press is reused");
         let pid = status().pid.expect("running");
         assert!(state.join("press/data").is_dir());
-        stop();
+        let asked = Instant::now();
+        stop(GRACE);
+        assert!(asked.elapsed() < GRACE + Duration::from_secs(1), "stop is prompt");
         assert!(!status().running);
-        assert!(Command::new("kill").args(["-0", &pid.to_string()]).status().map(|s| !s.success()).unwrap_or(true));
+        assert!(Command::new("kill").args(["-0", &pid.to_string()]).stderr(Stdio::null()).status().map(|s| !s.success()).unwrap_or(true));
         let _ = std::fs::remove_dir_all(state);
     }
 }
