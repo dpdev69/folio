@@ -3,7 +3,7 @@ export type Nav = {
   spread: number;
   margin: boolean;
   curl: null | { to: number; forward: boolean };
-  /** The plate the reader opened over the right page; a turn folds it back. */
+  /** The plate the reader opened over the right page; any page turn folds it back. */
   plateOpen: string | null;
 };
 
@@ -47,6 +47,8 @@ export function reduceNav(
       };
     }
     case "open-plate":
+      // Mid-curl the spread under the reader is about to change; the plate would land on the next one.
+      if (nav.curl) return { nav };
       return { nav: { ...nav, plateOpen: action.id } };
     case "fold-plate":
       return { nav: { ...nav, plateOpen: null } };
@@ -54,7 +56,8 @@ export function reduceNav(
       return { nav: { ...nav, margin: action.open } };
     case "curl-done":
       if (!nav.curl) return { nav };
-      return { nav: { ...nav, spread: nav.curl.to, curl: null, view: "reading" } };
+      // Curls also come from the tail-follow and chapter-jump effects, so the plate folds back here too.
+      return { nav: { ...nav, spread: nav.curl.to, curl: null, view: "reading", plateOpen: null } };
     case "turn": {
       if (nav.curl || nav.view !== "reading") return { nav };
       const folded = { ...nav, plateOpen: null };
@@ -70,6 +73,15 @@ export function reduceNav(
     default:
       return { nav };
   }
+}
+
+/**
+ * The open plate to lay over this spread's right page: only one footnoted on
+ * the spread (`plateIds`), and none while a page is turning.
+ */
+export function plateShown(nav: Nav, plateIds: string[]): string | null {
+  if (nav.curl || !nav.plateOpen) return null;
+  return plateIds.includes(nav.plateOpen) ? nav.plateOpen : null;
 }
 
 /**

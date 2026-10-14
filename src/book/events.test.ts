@@ -5,7 +5,7 @@ import { quillKey } from "./quill";
 import type { Book, Chapter } from "./model";
 import { pushSse, unwrapEvent } from "../engine/sse";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
-import { followTail, reduceNav, initialNav } from "../state/nav";
+import { followTail, reduceNav, initialNav, plateShown } from "../state/nav";
 import { captures, editDiff, FIXTURE_DIRECTORY } from "./__fixtures__/load";
 
 function book(): Book {
@@ -583,6 +583,26 @@ describe("page turns", () => {
     expect(last.effect).toBe("new-chapter");
     expect(last.nav.plateOpen).toBeNull();
     expect(reduceNav(opened, { type: "jump", spread: 0 }).nav.plateOpen).toBeNull();
+  });
+
+  it("folds an open plate back when a curl lands, whoever started it", () => {
+    const opened = reduceNav(initialNav(1), { type: "open-plate", id: "plate-1" }).nav;
+    // The tail-follow and chapter-jump effects set the curl directly, not through turn or jump.
+    const carried = { ...opened, curl: { to: 2, forward: true } };
+    expect(reduceNav(carried, { type: "curl-done" }).nav).toMatchObject({ spread: 2, curl: null, plateOpen: null });
+  });
+
+  it("does not open a plate while a page is turning", () => {
+    const turning = { ...initialNav(1), curl: { to: 2, forward: true } };
+    expect(reduceNav(turning, { type: "open-plate", id: "plate-1" }).nav.plateOpen).toBeNull();
+  });
+
+  it("shows an open plate only on the spread that footnotes it, and not under a curl", () => {
+    const opened = reduceNav(initialNav(1), { type: "open-plate", id: "plate-1" }).nav;
+    expect(plateShown(opened, ["plate-1", "plate-2"])).toBe("plate-1");
+    expect(plateShown(opened, ["plate-2"])).toBeNull();
+    expect(plateShown({ ...opened, curl: { to: 2, forward: true } }, ["plate-1"])).toBeNull();
+    expect(plateShown(initialNav(1), ["plate-1"])).toBeNull();
   });
 });
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Book, Chapter, PermissionAsk, Plate } from "../book/model";
 import { toRoman } from "../book/model";
 import type { LaidPage } from "../book/paginate";
+import { plateShown } from "../state/nav";
 import type { useFolio } from "../state/useFolio";
 import { MarginaliaPage } from "./Marginalia";
 import { PageFace } from "./Page";
@@ -193,8 +194,10 @@ function BoundPage({
   };
   let slips: Plate[] = [];
   if (side === "right") {
-    // A plate the reader opened lies over the page until it is folded back or the page turns.
-    const opened = folio.nav.plateOpen ? findPlate(book, folio.nav.plateOpen) : null;
+    // A plate the reader opened lies over the page until it is folded back or the page turns,
+    // and only over the spread that footnotes it.
+    const shown = plateShown(folio.nav, plates.map((plate) => plate.id));
+    const opened = shown ? findPlate(book, shown) : null;
     if (opened) return plateView(opened.plate, opened.chapter, folio.foldOpenPlate);
     // Prose never hides behind a plate: a page with lines keeps them and names its plates at the foot.
     // A bare page takes the plate, but the quill's page only for a change the press is asking about.
