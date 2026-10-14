@@ -1,6 +1,6 @@
 [package]
 name = "folio"
-version = "0.1.0"
+version = "0.2.0"
 description = "Folio, a book-skinned desktop client for the opencode server."
 authors = ["Folio"]
 edition = "2021"
