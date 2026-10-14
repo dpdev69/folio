@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { committedPrefix, paginateChapter, type LaidLine, type LaidPage } from "./paginate";
 import { sampleBook, SAMPLE_BREAKS } from "./sample";
 import { revealNextLine, wrapParagraph } from "./wrap";
-import type { Book, Chapter } from "./model";
+import type { Book, Chapter, Footnote } from "./model";
 import { applyEvent } from "./events";
 
 const measure = (text: string) => text.length;
@@ -161,6 +161,115 @@ describe("streaming stability", () => {
     expect(noted.flatMap((p) => p.lines).some((line) => line.notes.includes(1))).toBe(true);
     const plain = paginateChapter(chapter(text), opts);
     expect(plain.flatMap((p) => p.lines).every((line) => line.notes.length === 0)).toBe(true);
+  });
+});
+
+describe("room for the foot", () => {
+  const footChars = 20;
+  const footLines = (notes: Footnote[], extra: number) =>
+    notes.reduce((sum, note) => sum + Math.ceil(note.text.length / footChars), 0) + extra;
+  const opts = { measure, width: 40, linesPerPage: 8, dropLines: 3, dropWidth: 4, footLines };
+  const words = (n: number, from = 0) => Array.from({ length: n }, (_, i) => `word${i + from}`).join(" ");
+
+  /** A slip names the plates of a spread on its right page. */
+  function slipOn(pages: LaidPage[], index: number): number {
+    if (index % 2 === 0) return 0;
+    return [pages[index], pages[index - 1]].some((page) => page?.footnotes.some((note) => note.plateId)) ? 1 : 0;
+  }
+
+  function fits(pages: LaidPage[]) {
+    pages.forEach((page, index) => {
+      expect(page.lines.length + footLines(page.footnotes, slipOn(pages, index))).toBeLessThanOrEqual(opts.linesPerPage);
+    });
+  }
+
+  it("gives each footnote's lines back to the page it hangs on", () => {
+    const text = words(70);
+    const note: Footnote = { id: "f", n: 1, blockId: "b", offset: 30, text: "x".repeat(50) };
+    const plain = paginateChapter(chapter(text), opts);
+    const noted = paginateChapter({ ...chapter(text), footnotes: [note] }, opts);
+    expect(plain[0].lines).toHaveLength(8);
+    expect(noted[0].footnotes.map((f) => f.id)).toEqual(["f"]);
+    expect(noted[0].lines).toHaveLength(8 - 3);
+    expect(noted[1].lines[0]).toEqual(plain[0].lines[5]);
+    fits(noted);
+  });
+
+  it("counts the slip on the right page of a spread that shows a plate", () => {
+    const text = words(120);
+    const note: Footnote = { id: "f", n: 1, blockId: "b", offset: 10, text: "Edited a.", plateId: "plate-1" };
+    const laid = paginateChapter({ ...chapter(text), footnotes: [note] }, opts);
+    expect(laid[0].lines).toHaveLength(7);
+    expect(laid[1].footnotes).toEqual([]);
+    expect(laid[1].lines).toHaveLength(7);
+    expect(laid[2].lines).toHaveLength(8);
+    fits(laid);
+  });
+
+  it("moves a footnote added past the text to the next page with the line it hangs on", () => {
+    const text = words(40);
+    const plain = paginateChapter(chapter(text), opts);
+    expect(plain).toHaveLength(1);
+    expect(plain[0].lines).toHaveLength(8);
+    const note: Footnote = { id: "f", n: 1, blockId: "b", offset: 9999, text: "x".repeat(60) };
+    const laid = paginateChapter({ ...chapter(text), footnotes: [note] }, opts);
+    expect(laid).toHaveLength(2);
+    expect(laid[0].footnotes).toEqual([]);
+    expect(laid[1].footnotes.map((f) => f.id)).toEqual(["f"]);
+    expect(laid[1].lines.at(-1)?.notes).toContain(1);
+    expect([...laid[0].lines, ...laid[1].lines].map((line) => line.text)).toEqual(plain[0].lines.map((line) => line.text));
+    fits(laid);
+  });
+
+  it("never moves a line on an earlier page when a footnote lands on the page being written", () => {
+    const lead = words(60);
+    const deltas = Array.from({ length: 60 }, (_, i) => ` more${i}`);
+    let tail = "";
+    let before = paginateChapter(streamingNote(lead, tail, false), opts);
+    for (const [i, delta] of deltas.entries()) {
+      tail += delta;
+      const landed = i >= 20;
+      const after = paginateChapter(streamingNote(lead, tail, landed), opts);
+      const page = after.findIndex((p) => p.footnotes.length > 0);
+      const stable = landed && page >= 0 ? page : after.length - 1;
+      for (let p = 0; p < Math.min(stable, before.length - 1); p++) expect(after[p]).toEqual(before[p]);
+      fits(after);
+      before = after;
+    }
+    expect(before.some((page) => page.footnotes.length > 0)).toBe(true);
+
+    function streamingNote(a: string, b: string, withNote: boolean): Chapter {
+      return {
+        ...chapter(""),
+        blocks: [
+          { id: "a", voice: "prose", text: a },
+          { id: "b", voice: "prose", text: b },
+        ],
+        footnotes: withNote ? [{ id: "t", n: 1, blockId: "b", offset: " more0".repeat(20).length, text: "Ran the whole suite again." }] : [],
+      };
+    }
+  });
+
+  it("keeps the streaming guarantee with the foot reserved", () => {
+    const deltas = Array.from({ length: 300 }, (_, i) => (i === 0 ? "w0" : ` w${i}`));
+    const shape = (tail: string): Chapter => ({
+      ...chapter(""),
+      blocks: [
+        { id: "a", voice: "prose", text: "The test failed only on the build server, and nowhere else." },
+        { id: "b", voice: "prose", text: tail },
+      ],
+      footnotes: [{ id: "f", n: 1, blockId: "a", offset: 20, text: "Ran the suite forty times, and three of them failed." }],
+    });
+    let tail = "";
+    let before = paginateChapter(shape(tail), opts);
+    for (const delta of deltas) {
+      tail += delta;
+      const after = paginateChapter(shape(tail), opts);
+      expect(committedPrefix(before, after)).toBe(Math.max(0, before.length - 1));
+      before = after;
+    }
+    expect(before.length).toBeGreaterThan(3);
+    fits(before);
   });
 });
 

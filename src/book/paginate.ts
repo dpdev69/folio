@@ -34,6 +34,11 @@ export function paginateChapter(
     dropWidth: number;
     /** Forced breaks, used by the sample so scenes match the mockups. */
     breaksBefore?: string[];
+    /**
+     * Prose lines the page foot takes for these footnotes and `extra` one-line
+     * items (the slip that names a spread's plates). Without it the foot is free.
+     */
+    footLines?: (notes: Footnote[], extra: number) => number;
   },
 ): LaidPage[] {
   const measure = opts.measure ?? charMeasure;
@@ -49,8 +54,43 @@ export function paginateChapter(
     current = blank(chapter.id);
   };
 
+  /**
+   * Lines the page being written can hold with these footnotes at its foot.
+   * A right page also carries the slip when its spread footnotes a plate.
+   */
+  const room = (notes: Footnote[]): number => {
+    if (!opts.footLines) return opts.linesPerPage;
+    const right = pages.length % 2 === 1;
+    const plated = (list: Footnote[]) => list.some((note) => note.plateId);
+    const slip = right && (plated(notes) || plated(pages[pages.length - 1]?.footnotes ?? [])) ? 1 : 0;
+    if (!notes.length && !slip) return opts.linesPerPage;
+    return Math.max(1, opts.linesPerPage - opts.footLines(notes, slip));
+  };
+
+  /**
+   * A footnote placed after its lines can leave the page too full: carry its
+   * last lines, with the footnotes they hold, to a new page. Earlier pages stay.
+   */
+  const settle = () => {
+    while (current.lines.length > 1 && current.lines.length > room(current.footnotes)) {
+      const carried: LaidLine[] = [];
+      let kept = current.footnotes;
+      while (current.lines.length > 1 && current.lines.length > room(kept)) {
+        carried.unshift(current.lines.pop()!);
+        const staying = new Set(current.lines.flatMap((line) => line.notes));
+        const leaving = new Set(carried.flatMap((line) => line.notes));
+        kept = current.footnotes.filter((note) => staying.has(note.n) || !leaving.has(note.n));
+      }
+      const moved = current.footnotes.filter((note) => !kept.includes(note));
+      current.footnotes = kept;
+      flush();
+      current.lines = carried;
+      current.footnotes = moved;
+    }
+  };
+
   const pushGap = (blockId: string, voice: LaidLine["voice"]) => {
-    if (current.lines.length >= opts.linesPerPage) flush();
+    if (current.lines.length >= room(current.footnotes)) flush();
     current.lines.push({
       text: "",
       justify: false,
@@ -95,10 +135,12 @@ export function paginateChapter(
       });
       let plainStart = paragraph.start;
       wrapped.forEach((line, index) => {
-        if (current.lines.length >= opts.linesPerPage) flush();
         const notes = line.notes
           .map((n) => chapter.footnotes.find((f) => f.n === n))
           .filter((f): f is Footnote => Boolean(f));
+        // A line that brings a footnote needs room for both, or it starts the next page.
+        const fresh = notes.filter((note) => !current.footnotes.some((f) => f.id === note.id));
+        if (current.lines.length >= room([...current.footnotes, ...fresh])) flush();
         current.lines.push({
           ...line,
           blockId: item.id,
@@ -121,6 +163,7 @@ export function paginateChapter(
       if (host && !host.notes.includes(note.n)) host.notes.push(note.n);
       if (host && note.plateId && !host.plates.includes(note.plateId)) host.plates.push(note.plateId);
     }
+    settle();
   }
   flush();
   return pages;

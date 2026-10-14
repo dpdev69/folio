@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SCALE_INDEX, SCALES, layoutScale, proseFont } from "./scales";
+import { DEFAULT_SCALE_INDEX, SCALES, footChars, footReserve, layoutScale, proseFont } from "./scales";
 import { themeById } from "./themes";
 
 const original = themeById("original");
@@ -62,5 +62,25 @@ describe("scales", () => {
     expect(proseFont(base, themeById("quiet"))).toMatch(/^400 19px "EB Garamond"/);
     expect(proseFont(base, themeById("bold"))).toMatch(/^600 19px "EB Garamond"/);
     expect(proseFont(base, themeById("focus"))).toMatch(/^500 19px -apple-system/);
+  });
+});
+
+describe("the page foot", () => {
+  const base = SCALES[DEFAULT_SCALE_INDEX];
+
+  it("fits about sixty characters of footnote type to a line of the default measure", () => {
+    expect(footChars(base)).toBe(Math.floor(386 / (15 * 0.46)));
+    expect(footChars(base, 6.4)).toBe(60);
+    expect(footChars(base, 1000)).toBe(24);
+  });
+
+  it("costs each footnote its own lines, and a line for each slip or ask", () => {
+    const reserve = footReserve(60);
+    expect(reserve([], 0)).toBe(0);
+    expect(reserve([{ n: 1, text: "Read src/greet.ts." }], 0)).toBe(1);
+    const long = { n: 2, text: "Edited /Users/someone/projects/a-long-name/src/greet.ts, 4 lines added. See Plate I →" };
+    expect(reserve([long], 0)).toBe(2);
+    expect(reserve([{ n: 1, text: "Read a." }, long], 1)).toBe(4);
+    expect(reserve([], 2)).toBe(2);
   });
 });

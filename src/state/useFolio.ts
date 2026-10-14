@@ -10,7 +10,7 @@ import { coalesce } from "../engine/coalesce";
 import type { EventFrame } from "../engine/sse";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, initialNav, reduceNav, type Nav } from "./nav";
-import { DEFAULT_SCALE_INDEX, SCALES, inkFont, layoutScale, proseFont } from "../ui/scales";
+import { DEFAULT_SCALE_INDEX, SCALES, footChars, footFont, footReserve, inkFont, layoutScale, proseFont } from "../ui/scales";
 import { useSettings } from "./useSettings";
 import { keyProviders, pressSummary, type PressPhase } from "../welcome/copy";
 import {
@@ -137,6 +137,20 @@ export function useFolio() {
     return { prose, ink };
   }, [measure]);
 
+  // The foot's own type, measured once per face, sets how many characters a footnote line holds.
+  const footLines = useMemo(() => {
+    const sample = "Edited src/greet.ts, 4 lines added. See Plate I.";
+    const ctx = fontsReady ? measureCanvas().getContext("2d") : null;
+    let average: number | undefined;
+    if (ctx) {
+      ctx.font = footFont(theme);
+      average = ctx.measureText(sample).width / sample.length;
+    }
+    return footReserve(footChars(scale, average));
+    // faceEpoch measures again once a newly chosen face has loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontsReady, scale, theme, faceEpoch]);
+
   const layout = useMemo(() => {
     if (!book) return { pages: [] as LaidPage[], chapterStart: {} as Record<string, number> };
     return paginateBook(book.chapters, {
@@ -146,9 +160,10 @@ export function useFolio() {
       linesPerPage: scale.lines,
       dropLines: scale.dropLines,
       dropWidth: scale.dropWidth,
+      footLines,
       breaks: book.sample ? SAMPLE_BREAKS : undefined,
     });
-  }, [book, measures, scale]);
+  }, [book, measures, scale, footLines]);
 
   const spreadCount = Math.max(1, Math.ceil(layout.pages.length / 2));
 

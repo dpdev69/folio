@@ -52,6 +52,30 @@ export function layoutScale(
   };
 }
 
+/** The footnotes' and slips' type size, as styles.css sets it. */
+export const FOOT_SIZE = 15;
+
+/**
+ * Characters of footnote type in one line of the foot. The foot is at least as
+ * wide as the prose measure, so measuring against that leaves room for word breaks.
+ */
+export function footChars(scale: Scale, averageChar = FOOT_SIZE * 0.46): number {
+  return Math.max(24, Math.floor(scale.width / Math.max(1, averageChar)));
+}
+
+/**
+ * Prose lines the page foot takes: each footnote its own lines (number and
+ * text, `chars` to a line), and one line for each slip or ask.
+ */
+export function footReserve(chars: number): (notes: { n: number; text: string }[], extra: number) => number {
+  return (notes, extra) =>
+    notes.reduce((sum, note) => sum + Math.max(1, Math.ceil((`${note.n}  ${note.text}`.length) / chars)), 0) + extra;
+}
+
+export function footFont(theme?: Theme): string {
+  return `${theme?.weight ?? 500} ${FOOT_SIZE}px ${theme?.face ?? SERIF}`;
+}
+
 export function proseFont(scale: Scale, theme?: Theme): string {
   return `${theme?.weight ?? 500} ${scale.fontSize}px ${theme?.face ?? SERIF}`;
 }
