@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -187,11 +187,27 @@ export function inside(directory: string, file: string): string {
   if (!file || path.isAbsolute(file) || file.split(/[\\/]/).includes("..")) throw new Error(`${file} is outside the book.`);
   const root = realpathSync(directory);
   const target = path.join(directory, file);
+  // lstat does not follow links, so a link to a missing target counts as
+  // existing; realpath then fails on it, and it is refused.
   let existing = target;
-  while (!existsSync(existing)) existing = path.dirname(existing);
-  const real = realpathSync(existing);
+  while (!lexists(existing)) existing = path.dirname(existing);
+  let real: string;
+  try {
+    real = realpathSync(existing);
+  } catch {
+    throw new Error(`${file} is outside the book.`);
+  }
   if (real !== root && !real.startsWith(root + path.sep)) throw new Error(`${file} is outside the book.`);
   return target;
+}
+
+function lexists(file: string): boolean {
+  try {
+    lstatSync(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function reachable(url: string): Promise<boolean> {

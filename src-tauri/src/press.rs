@@ -359,11 +359,13 @@ fn resolve_inside(directory: &str, path: &str) -> Result<PathBuf, String> {
     let target = root.join(relative);
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     // The deepest part of the path that exists must still be inside the book.
+    // `symlink_metadata` does not follow links, so a link to a missing target
+    // counts as existing; canonicalizing it then fails, and it is refused.
     let mut existing = target.as_path();
-    while !existing.exists() {
+    while existing.symlink_metadata().is_err() {
         existing = existing.parent().ok_or_else(|| format!("{path} is outside the book."))?;
     }
-    let real = existing.canonicalize().map_err(|e| e.to_string())?;
+    let real = existing.canonicalize().map_err(|_| format!("{path} is outside the book."))?;
     if !real.starts_with(&root) {
         return Err(format!("{path} is outside the book."));
     }
@@ -430,6 +432,31 @@ mod tests {
         assert_eq!(read_file(dir, "src/greet.ts").unwrap(), "hello\n");
         assert!(!write_file(dir, "../escape.txt", "x").ok);
         std::fs::remove_dir_all(&book).unwrap();
+    }
+
+    /// A link to a file that does not exist yet must not let a write create it outside the book.
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_link_to_a_missing_file_outside_the_book() {
+        let base = std::env::temp_dir().join(format!("folio-press-dangling-{}", std::process::id()));
+        let book = base.join("book");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&book).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink("../outside/planted.txt", book.join("link.txt")).unwrap();
+        std::os::unix::fs::symlink("../outside/missing-dir", book.join("gone")).unwrap();
+        let dir = book.to_str().unwrap();
+        assert!(resolve_inside(dir, "link.txt").is_err());
+        assert!(resolve_inside(dir, "gone/file.txt").is_err());
+        assert!(!write_file(dir, "link.txt", "planted\n").ok);
+        assert!(!write_file(dir, "gone/file.txt", "planted\n").ok);
+        assert!(!outside.join("planted.txt").exists());
+        assert!(!outside.join("missing-dir").exists());
+        // A link that stays inside the book still works.
+        std::fs::write(book.join("real.txt"), "inside\n").unwrap();
+        std::os::unix::fs::symlink("real.txt", book.join("alias.txt")).unwrap();
+        assert!(resolve_inside(dir, "alias.txt").is_ok());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
