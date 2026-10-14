@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePatch, reversePatch } from "./diff";
+import { parsePatch, reversePatch, shownLineNumber } from "./diff";
 import { editDiff } from "./__fixtures__/load";
 
 const TOOL_PATCH =
@@ -98,6 +98,20 @@ describe("parsePatch", () => {
   it("returns nothing for text that is not a patch", () => {
     expect(parsePatch("")).toEqual([]);
     expect(parsePatch("Binary files a/x.png and b/x.png differ")).toEqual([]);
+  });
+});
+
+describe("plate line numbers", () => {
+  it("numbers kept and added lines as the file reads after the change, removed lines as before", () => {
+    const lines = parsePatch("--- a/src/shout.ts\n+++ b/src/shout.ts\n@@ -1,2 +1,4 @@\n+/** Loud and quiet helpers. */\n+\n /** Make a line louder. */\n-export function shout() {}\n+export function shout(line: string) {}\n");
+    expect(lines.map((line) => [line.kind, shownLineNumber(line)])).toEqual([
+      ["add", 1],
+      ["add", 2],
+      ["context", 3],
+      ["del", 2],
+      ["add", 4],
+    ]);
+    expect(shownLineNumber({ kind: "context", text: "…" })).toBeUndefined();
   });
 });
 

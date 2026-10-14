@@ -5,6 +5,14 @@ type Row =
   | { kind: "del"; text: string; oldNo: number }
   | { kind: "add"; text: string; newNo: number };
 
+/**
+ * The number a plate prints beside a line: where it stands in the file after
+ * the change, or, for a removed line, where it stood before.
+ */
+export function shownLineNumber(line: PlateLine): number | undefined {
+  return line.kind === "del" ? line.oldNo : (line.newNo ?? line.oldNo);
+}
+
 /** A small line diff. Long files are truncated before the comparison. */
 export function plateLines(before: string, after: string, opts?: { context?: number; maxLines?: number }): PlateLine[] {
   const context = opts?.context ?? 1;

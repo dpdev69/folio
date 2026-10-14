@@ -1,3 +1,4 @@
+import { shownLineNumber } from "../book/diff";
 import type { PermissionAsk, Plate } from "../book/model";
 import { plateRoman } from "./Page";
 
@@ -57,7 +58,7 @@ export function PlatePage({
                 <ol className="diff">
                   {plate.lines.map((line, index) => (
                     <li key={index} className={`diff-line ${line.kind}`}>
-                      <span className="ln">{line.kind === "add" ? line.newNo : line.oldNo}</span>
+                      <span className="ln">{shownLineNumber(line)}</span>
                       <code>{line.text || " "}</code>
                     </li>
                   ))}
