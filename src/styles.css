@@ -126,6 +126,12 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 }
 .menu button:hover, .search-card button:hover { color: var(--terra); }
 .menu .on { color: var(--terra); }
+.model-list { max-height: min(320px, 50vh); overflow: auto; border-top: 1px solid var(--rule); margin-top: 4px; padding-top: 4px; }
+.model-provider {
+  margin: 6px 16px 2px; color: var(--faint);
+  font-variant-caps: all-small-caps; letter-spacing: 0.12em; font-size: 13px;
+}
+.menu .model-list button { padding: 4px 16px 4px 26px; }
 .search-card { right: 28px; width: min(360px, calc(100vw - 40px)); padding: 12px; }
 .search-card input {
   width: 100%; border: 0; border-bottom: 1px solid var(--rule);
@@ -238,6 +244,48 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   border: 0; background: transparent; color: var(--terra); padding: 0 4px; font-size: inherit;
 }
 .ask .quiet, .plate-actions button:not(:first-child) { color: var(--soft); }
+.ask .dot, .form-actions .dot { color: var(--faint); }
+
+/* A question from the press, at the foot of the left page. */
+.ask-form {
+  max-height: 46%; overflow: auto;
+  margin: 0 0 6px; padding: 8px 0 4px;
+  border-top: 1px solid var(--rule);
+  font-size: 15px; color: var(--soft); text-align: center;
+}
+.foot:has(.ask-form) { max-height: 52%; overflow: auto; }
+.form-field { border: 0; margin: 0 0 6px; padding: 0; min-width: 0; }
+.form-field legend {
+  margin: 0 auto; padding: 0;
+  font-variant-caps: all-small-caps; letter-spacing: 0.12em; color: var(--faint); font-size: 14px;
+}
+.form-desc { margin: 2px 0 4px; font-style: italic; color: var(--ink); }
+.form-options { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 14px; margin: 2px 0; }
+.form-options button, .form-actions button {
+  border: 0; background: transparent; padding: 0 2px; font-size: inherit; color: var(--soft);
+  border-bottom: 1px solid transparent;
+}
+.form-options button:hover { color: var(--terra); }
+.form-options button[aria-pressed="true"] { color: var(--terra); border-bottom-color: var(--terra); }
+.form-options label { display: inline-flex; align-items: center; gap: 5px; }
+.form-options input[type="checkbox"] { accent-color: var(--terra); }
+.form-line {
+  width: min(260px, 100%); border: 0; border-bottom: 1px solid var(--rule);
+  background: transparent; color: var(--ink); font-size: 15px; text-align: center;
+  padding: 3px 2px; outline: none;
+}
+.form-line::placeholder { color: var(--faint); font-style: italic; }
+.form-actions { margin: 4px 0 0; }
+.form-actions button[type="submit"] { color: var(--terra); }
+.form-actions button:disabled { color: var(--faint); cursor: default; }
+
+/* A plate that faces a page of prose waits at its foot. */
+.slip { margin: 8px 0 0; padding: 6px 0 0; border-top: 1px solid var(--rule); font-size: 15px; line-height: 1.35; }
+.footnotes + .slip, .slip + .slip { margin-top: 3px; padding-top: 0; border-top: 0; }
+.slip button, .fn-plate {
+  border: 0; background: transparent; padding: 0; font-size: inherit; font-style: italic; color: var(--terra);
+}
+.slip button:hover, .fn-plate:hover { color: var(--terra-deep); }
 .quill-block { margin-top: 8px; }
 .ornament { display: block; width: 72px; height: 16px; margin: 8px auto 4px; stroke: var(--faint); fill: none; stroke-width: 1; }
 .quill {

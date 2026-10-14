@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Chapter, Plate } from "../book/model";
+import type { Book, Chapter, Plate } from "../book/model";
 import { toRoman } from "../book/model";
 import type { LaidPage } from "../book/paginate";
 import type { useFolio } from "../state/useFolio";
@@ -118,9 +118,15 @@ function Spread({
   if (!left || !folio.book) return null;
   return (
     <>
-      <BoundPage folio={folio} page={left} side="left" quill={false} />
+      <BoundPage folio={folio} page={left} side="left" quill={false} plates={[]} />
       {right ? (
-        <BoundPage folio={folio} page={right} side="right" quill={!hiddenQuill && isQuillPage(folio, right)} />
+        <BoundPage
+          folio={folio}
+          page={right}
+          side="right"
+          quill={!hiddenQuill && isQuillPage(folio, right)}
+          plates={platesOnSpread(folio, left, right)}
+        />
       ) : (
         <article className="sheet right" />
       )}
@@ -133,17 +139,19 @@ function BoundPage({
   page,
   side,
   quill,
+  plates,
 }: {
   folio: Folio;
   page: LaidPage;
   side: "left" | "right";
   quill: boolean;
+  /** The plates footnoted on this spread; only the right page shows them. */
+  plates: Plate[];
 }) {
   const book = folio.book!;
   const chapter = book.chapters.find((item) => item.id === page.chapterId);
   const roman = romanFor(book.chapters, page.chapterId);
   const number = folio.pages.indexOf(page) + 1;
-  const plate = side === "right" ? facingPlate(folio, page) : undefined;
   const notes = chapter?.notes.filter((note) => pageQuotes(folio, page).some((quote) => quote && note.quote.includes(quote.slice(0, 24)))) ?? chapter?.notes ?? [];
   if (side === "right" && folio.nav.margin && chapter) {
     return (
@@ -166,34 +174,37 @@ function BoundPage({
       />
     );
   }
-  if (plate && side === "right") {
+  const plateView = (plate: Plate, owner: Chapter | undefined, onFold: () => void, folded = false) => {
+    const ask = owner?.asks.find((item) => item.callId && `plate-${item.callId}` === plate.id);
     return (
       <PlatePage
         plate={plate}
         bookTitle={book.title}
         number={number}
+        folded={folded}
+        ask={ask}
+        onAsk={ask && owner ? (decision) => void folio.answerAsk(owner.id, ask.id, decision) : undefined}
         onAccept={() => folio.acceptPlate(plate.id)}
         onRevise={() => folio.revisePlate(plate.id)}
         onReject={() => folio.rejectPlate(plate.id)}
-        onFold={() => folio.foldPlate(plate.id)}
+        onFold={onFold}
       />
     );
-  }
-  const folded = side === "right" ? foldedPlate(folio, page) : undefined;
-  const bare = page.lines.every((line) => line.gap || !line.text);
-  if (folded && bare) {
-    return (
-      <PlatePage
-        plate={folded}
-        bookTitle={book.title}
-        number={number}
-        folded
-        onAccept={() => undefined}
-        onRevise={() => undefined}
-        onReject={() => undefined}
-        onFold={() => folio.foldPlate(folded.id)}
-      />
-    );
+  };
+  let slips: Plate[] = [];
+  if (side === "right") {
+    // A plate the reader opened lies over the page until it is folded back or the page turns.
+    const opened = folio.nav.plateOpen ? findPlate(book, folio.nav.plateOpen) : null;
+    if (opened) return plateView(opened.plate, opened.chapter, folio.foldOpenPlate);
+    // Prose never hides behind a plate: a page with lines keeps them and names its plates at the foot.
+    // A bare page takes the plate, but the quill's page only for a change the press is asking about.
+    const bare = page.lines.every((line) => line.gap || !line.text);
+    const asking = plates.find((plate) => !plate.folded && chapter?.asks.some((ask) => ask.callId && `plate-${ask.callId}` === plate.id));
+    const facing = isQuillPage(folio, page) ? asking : plates.find((plate) => !plate.folded);
+    const folded = isQuillPage(folio, page) ? undefined : plates.find((plate) => plate.folded);
+    if (bare && facing) return plateView(facing, chapter, () => folio.foldPlate(facing.id));
+    if (bare && folded) return plateView(folded, chapter, () => folio.foldPlate(folded.id), true);
+    slips = plates;
   }
   return (
     <PageFace
@@ -210,6 +221,11 @@ function BoundPage({
       onSelect={folio.selectQuote}
       asks={side === "left" ? (chapter?.asks ?? []) : []}
       onAsk={(id, response) => chapter && folio.answerAsk(chapter.id, id, response)}
+      forms={side === "left" ? (chapter?.forms ?? []) : []}
+      onFormSend={(formId, answer) => chapter && void folio.answerForm(chapter.id, formId, answer)}
+      onFormSkip={(formId) => chapter && void folio.dismissForm(chapter.id, formId)}
+      slips={slips}
+      onOpenPlate={folio.openPlate}
       busy={Boolean(chapter?.busy)}
       onStop={folio.stop}
       askBeforeWrite={folio.askBeforeWrite}
@@ -247,32 +263,32 @@ function romanFor(chapters: Chapter[], id: string): string {
   return toRoman(Math.max(1, index + 1));
 }
 
+/** The right page of its chapter's last spread carries the quill. */
 function isQuillPage(folio: Folio, page: LaidPage): boolean {
   let last = 0;
   folio.pages.forEach((item, index) => {
     if (item.chapterId === page.chapterId) last = Math.floor(index / 2);
   });
-  return folio.nav.spread === last && !folio.nav.margin;
+  return Math.floor(folio.pages.indexOf(page) / 2) === last && !folio.nav.margin;
 }
 
-function facingPlate(folio: Folio, right: LaidPage): Plate | undefined {
-  return plateOnSpread(folio, right, false);
-}
-
-function foldedPlate(folio: Folio, right: LaidPage): Plate | undefined {
-  return plateOnSpread(folio, right, true);
-}
-
-function plateOnSpread(folio: Folio, right: LaidPage, folded: boolean): Plate | undefined {
-  const left = folio.pages[folio.nav.spread * 2];
+/** The plates footnoted on a spread, in plate order. */
+function platesOnSpread(folio: Folio, left: LaidPage, right: LaidPage): Plate[] {
   const ids = new Set<string>();
   for (const page of [left, right]) {
-    if (!page) continue;
     for (const note of page.footnotes) if (note.plateId) ids.add(note.plateId);
     for (const line of page.lines) for (const id of line.plates) ids.add(id);
   }
-  const chapter = folio.book?.chapters.find((item) => item.id === (left?.chapterId ?? right.chapterId));
-  return chapter?.plates.find((plate) => ids.has(plate.id) && plate.folded === folded);
+  const chapter = folio.book?.chapters.find((item) => item.id === left.chapterId);
+  return chapter?.plates.filter((plate) => ids.has(plate.id)) ?? [];
+}
+
+function findPlate(book: Book, id: string): { chapter: Chapter; plate: Plate } | null {
+  for (const chapter of book.chapters) {
+    const plate = chapter.plates.find((item) => item.id === id);
+    if (plate) return { chapter, plate };
+  }
+  return null;
 }
 
 function pageQuotes(folio: Folio, page: LaidPage): string[] {

@@ -1,10 +1,12 @@
 import { useRef } from "react";
 import { highlightMap } from "../book/highlight";
-import type { Chapter, PermissionAsk } from "../book/model";
+import type { FormReply } from "../book/forms";
+import type { Chapter, Footnote, Form, PermissionAsk, Plate } from "../book/model";
 import { displayTitle } from "../book/model";
 import type { LaidPage } from "../book/paginate";
 import { quillKey } from "../book/quill";
 import { toRoman } from "../book/model";
+import { FormView } from "./Forms";
 import { LineView } from "./lines";
 import { Ornament } from "./icons";
 
@@ -22,6 +24,11 @@ export function PageFace({
   onSelect,
   asks,
   onAsk,
+  forms = [],
+  onFormSend = () => undefined,
+  onFormSkip = () => undefined,
+  slips = [],
+  onOpenPlate = () => undefined,
   busy,
   onStop,
   askBeforeWrite,
@@ -39,6 +46,13 @@ export function PageFace({
   onSelect: (quote: string) => void;
   asks: PermissionAsk[];
   onAsk: (id: string, response: "once" | "reject") => void;
+  /** Questions from the press, on the left page above the asks. */
+  forms?: Form[];
+  onFormSend?: (formId: string, answer: FormReply) => void;
+  onFormSkip?: (formId: string) => void;
+  /** Plates that face this page while its prose keeps it; each opens over the page. */
+  slips?: Plate[];
+  onOpenPlate?: (plateId: string) => void;
   busy: boolean;
   onStop: () => void;
   askBeforeWrite: boolean;
@@ -48,6 +62,8 @@ export function PageFace({
   const marks = highlightMap(page.lines, quotes);
   const empty = page.lines.every((line) => line.gap || !line.text);
   const heading = side === "left" ? `Chapter ${roman}  ·  ${displayTitle(chapter ?? fallbackChapter(page.chapterId))}` : bookTitle;
+  // A question from the press, or a passing remark such as a retry, takes the hint's place.
+  const waiting = chapter?.forms.length ? "the press is waiting for your answer" : chapter?.notice;
 
   return (
     <article className={`sheet ${side}`} data-side={side}>
@@ -71,6 +87,9 @@ export function PageFace({
         )}
       </div>
       <footer className="foot">
+        {forms.map((form) => (
+          <FormView key={form.id} form={form} onSend={(answer) => onFormSend(form.id, answer)} onSkip={() => onFormSkip(form.id)} />
+        ))}
         {asks.map((ask) => (
           <p key={ask.id} className="ask">
             <span>{ask.title}</span>
@@ -88,11 +107,18 @@ export function PageFace({
             {page.footnotes.map((note) => (
               <li key={note.id}>
                 <span className="fn-num">{note.n}</span>
-                <span>{note.text}</span>
+                <FootnoteText note={note} onOpenPlate={onOpenPlate} />
               </li>
             ))}
           </ol>
         )}
+        {slips.map((plate) => (
+          <p key={plate.id} className="slip">
+            <button type="button" onClick={() => onOpenPlate(plate.id)}>
+              Plate {plateRoman(plate.n)} faces this page — open it
+            </button>
+          </p>
+        ))}
         {quill && (
           <div className="quill-block">
             {page.footnotes.length === 0 && (quill || !empty) ? <Ornament /> : null}
@@ -114,9 +140,14 @@ export function PageFace({
             />
             <p className="hint">
               {busy ? (
-                <button type="button" className="hint-button" onClick={onStop}>
-                  stop
-                </button>
+                <>
+                  {waiting ? `${waiting}  ·  ` : null}
+                  <button type="button" className="hint-button" onClick={onStop}>
+                    stop
+                  </button>
+                </>
+              ) : waiting ? (
+                waiting
               ) : askBeforeWrite ? (
                 "the press will ask before it writes  ·  return twice to send"
               ) : (
@@ -128,6 +159,21 @@ export function PageFace({
       </footer>
       <p className="folio-num">{number}</p>
     </article>
+  );
+}
+
+/** A footnote's "See Plate N →" opens that plate over the right page. */
+function FootnoteText({ note, onOpenPlate }: { note: Footnote; onOpenPlate: (plateId: string) => void }) {
+  const mark = note.plateId ? /See Plate [IVXLCDM]+ →$/.exec(note.text) : null;
+  if (!mark || !note.plateId) return <span>{note.text}</span>;
+  const plateId = note.plateId;
+  return (
+    <span>
+      {note.text.slice(0, mark.index)}
+      <button type="button" className="fn-plate" onClick={() => onOpenPlate(plateId)}>
+        {mark[0]}
+      </button>
+    </span>
   );
 }
 
