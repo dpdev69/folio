@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { formAnswer, type FormReply, type FormValue, type FormValues } from "../book/forms";
 import type { Form, FormField } from "../book/model";
 
@@ -43,6 +43,17 @@ export function FormView({ form, onSend, onSkip }: { form: Form; onSend: (answer
 }
 
 function FieldInput({ field, value, onChange }: { field: FormField; value: FormValue; onChange: (value: FormValue) => void }) {
+  const descBase = useId();
+  // With any option described, the options stand one above another, each with its quiet line beneath.
+  const described = (field.options ?? []).some((option) => option.description);
+  const optionsClass = described ? "form-options described" : "form-options";
+  const descId = (index: number) => `${descBase}-${index}`;
+  const desc = (description: string | undefined, index: number) =>
+    description ? (
+      <span className="form-option-desc" id={descId(index)}>
+        {description}
+      </span>
+    ) : null;
   if (field.type === "boolean") {
     return (
       <p className="form-options">
@@ -57,18 +68,22 @@ function FieldInput({ field, value, onChange }: { field: FormField; value: FormV
   if (field.type === "multiselect") {
     const picked = Array.isArray(value) ? value : [];
     return (
-      <p className="form-options">
-        {(field.options ?? []).map((option) => (
-          <label key={option.value} title={option.description}>
-            <input
-              type="checkbox"
-              checked={picked.includes(option.value)}
-              onChange={(event) =>
-                onChange(event.target.checked ? [...picked, option.value] : picked.filter((item) => item !== option.value))
-              }
-            />
-            {option.label}
-          </label>
+      <p className={optionsClass}>
+        {(field.options ?? []).map((option, index) => (
+          <span key={option.value} className="form-option">
+            <label>
+              <input
+                type="checkbox"
+                aria-describedby={option.description ? descId(index) : undefined}
+                checked={picked.includes(option.value)}
+                onChange={(event) =>
+                  onChange(event.target.checked ? [...picked, option.value] : picked.filter((item) => item !== option.value))
+                }
+              />
+              {option.label}
+            </label>
+            {desc(option.description, index)}
+          </span>
         ))}
       </p>
     );
@@ -93,17 +108,19 @@ function FieldInput({ field, value, onChange }: { field: FormField; value: FormV
   return (
     <>
       {options.length ? (
-        <p className="form-options">
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              title={option.description}
-              aria-pressed={value === option.value}
-              onClick={() => onChange(option.value)}
-            >
-              {option.label}
-            </button>
+        <p className={optionsClass}>
+          {options.map((option, index) => (
+            <span key={option.value} className="form-option">
+              <button
+                type="button"
+                aria-pressed={value === option.value}
+                aria-describedby={option.description ? descId(index) : undefined}
+                onClick={() => onChange(option.value)}
+              >
+                {option.label}
+              </button>
+              {desc(option.description, index)}
+            </span>
           ))}
         </p>
       ) : null}
