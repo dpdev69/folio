@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Book, Chapter, Plate } from "../book/model";
+import type { Book, Chapter, PermissionAsk, Plate } from "../book/model";
 import { toRoman } from "../book/model";
 import type { LaidPage } from "../book/paginate";
 import type { useFolio } from "../state/useFolio";
@@ -175,7 +175,7 @@ function BoundPage({
     );
   }
   const plateView = (plate: Plate, owner: Chapter | undefined, onFold: () => void, folded = false) => {
-    const ask = owner?.asks.find((item) => item.callId && `plate-${item.callId}` === plate.id);
+    const ask = owner ? askFor(owner, plate) : undefined;
     return (
       <PlatePage
         plate={plate}
@@ -199,7 +199,7 @@ function BoundPage({
     // Prose never hides behind a plate: a page with lines keeps them and names its plates at the foot.
     // A bare page takes the plate, but the quill's page only for a change the press is asking about.
     const bare = page.lines.every((line) => line.gap || !line.text);
-    const asking = plates.find((plate) => !plate.folded && chapter?.asks.some((ask) => ask.callId && `plate-${ask.callId}` === plate.id));
+    const asking = plates.find((plate) => !plate.folded && chapter && askFor(chapter, plate));
     const facing = isQuillPage(folio, page) ? asking : plates.find((plate) => !plate.folded);
     const folded = isQuillPage(folio, page) ? undefined : plates.find((plate) => plate.folded);
     if (bare && facing) return plateView(facing, chapter, () => folio.foldPlate(facing.id));
@@ -281,6 +281,11 @@ function platesOnSpread(folio: Folio, left: LaidPage, right: LaidPage): Plate[] 
   }
   const chapter = folio.book?.chapters.find((item) => item.id === left.chapterId);
   return chapter?.plates.filter((plate) => ids.has(plate.id)) ?? [];
+}
+
+/** The permission ask holding this plate's edit; the reducer names an edit's plate `plate-<callId>`. */
+function askFor(chapter: Chapter, plate: Plate): PermissionAsk | undefined {
+  return chapter.asks.find((ask) => ask.callId && `plate-${ask.callId}` === plate.id);
 }
 
 function findPlate(book: Book, id: string): { chapter: Chapter; plate: Plate } | null {
