@@ -9,9 +9,11 @@ import {
   type PermissionAsk,
   type ProseBlock,
 } from "./model";
-import { applyDiff, dropPlate, filesOf, toolPlate } from "./plates";
+import { applyDiff, diffPlateId, dropPlate, filesOf, toolPlate } from "./plates";
 import { NOTE_PREFIX, parseNote } from "./notes";
 import { footnoteSentence, isEdit, type ToolLike } from "./tools";
+import { numberOf, recordOf, stringOf, type Data } from "./values";
+import { stripThink } from "./think";
 
 /**
  * One event frame from opencode 2.0, `{id, type, data, location?}`, as it
@@ -19,8 +21,6 @@ import { footnoteSentence, isEdit, type ToolLike } from "./tools";
  * `location` are read; anything without `data` is ignored.
  */
 export type Frame = { type?: string; data?: unknown; location?: unknown; [key: string]: unknown };
-
-type Data = Record<string, unknown>;
 
 export function applyEvent(book: Book, frame: Frame): Book {
   const type = frame.type ?? "";
@@ -221,19 +221,36 @@ export function noteSent(chapter: Chapter, noteId: string, messageId: string): C
 
 /**
  * Give a block a new id, and correct everything that names it: footnote
- * anchors, the turns it began, and the plates of those turns. The hook calls
- * this when the prompt call returns the user message id for a `local-…` line.
+ * anchors, the turns it began, and the plates of those turns, including the id
+ * of a diff plate named by that turn (`diff-<file>@<turn>`) and the footnotes
+ * that point at it, so its Accept or Reject is kept under the id a reload
+ * gives it. The hook calls this when the prompt call returns the user message
+ * id for a `local-…` line. If a block already has the new id (the stream set
+ * the prompt first), the `local-…` line is folded into it: ids stay unique.
  */
 export function renameBlock(chapter: Chapter, from: string, to: string): Chapter {
   if (from === to || !chapter.blocks.some((b) => b.id === from)) return chapter;
+  const taken = chapter.blocks.some((b) => b.id === to);
   const turns = chapter.turns
     ? Object.fromEntries(Object.entries(chapter.turns).map(([aid, turn]) => [aid, turn === from ? to : turn]))
     : chapter.turns;
+  const plateIds = new Map<string, string>();
+  for (const plate of chapter.plates) {
+    if (plate.turnMessageId !== from || plate.id !== diffPlateId(plate.file, from)) continue;
+    const id = diffPlateId(plate.file, to);
+    if (!chapter.plates.some((p) => p.id === id)) plateIds.set(plate.id, id);
+  }
+  const renamePlate = (id: string | undefined) => (id !== undefined ? (plateIds.get(id) ?? id) : id);
   return {
     ...chapter,
-    blocks: chapter.blocks.map((b) => (b.id === from ? { ...b, id: to } : b)),
-    footnotes: chapter.footnotes.map((f) => (f.blockId === from ? { ...f, blockId: to } : f)),
-    plates: chapter.plates.map((p) => (p.turnMessageId === from ? { ...p, turnMessageId: to } : p)),
+    blocks: taken ? chapter.blocks.filter((b) => b.id !== from) : chapter.blocks.map((b) => (b.id === from ? { ...b, id: to } : b)),
+    footnotes: chapter.footnotes.map((f) => {
+      let note = f.blockId === from ? { ...f, blockId: to } : f;
+      const plateId = renamePlate(f.plateId);
+      if (plateId !== f.plateId) note = { ...note, plateId };
+      return note;
+    }),
+    plates: chapter.plates.map((p) => (p.turnMessageId === from ? { ...p, id: renamePlate(p.id)!, turnMessageId: to } : p)),
     turns,
   };
 }
@@ -257,6 +274,9 @@ export function addInk(chapter: Chapter, id: string, text: string, marginal = fa
  * closes the margin note the block answers. A block of the turn a waiting note
  * was sent as (its assistant message's turn is the note's own message) is that
  * note's reply and stays out of the main flow; any other turn's text does not.
+ * Reasoning leaked at the start of the part (`</think>`, `<think>…</think>`)
+ * is taken off. A part that arrives before an earlier part of its message is
+ * set after that part, not at the end, so the stream's order cannot open a hole.
  */
 export function setText(
   chapter: Chapter,
@@ -269,23 +289,43 @@ export function setText(
   const index = blocks.findIndex((b) => b.id === id);
   const prev = index >= 0 ? blocks[index] : undefined;
   let next: string;
-  if (!prev) next = text;
-  else if (mode === "append") next = prev.text + text;
-  else next = text.length >= prev.text.length ? text : prev.text;
+  if (!prev) next = stripThink(text);
+  else if (mode === "append") next = stripThink(prev.text + text);
+  else {
+    const whole = stripThink(text);
+    next = whole.length >= prev.text.length ? whole : prev.text;
+  }
   const turn = assistantMessageID ? chapter.turns?.[assistantMessageID] : undefined;
   const owner = turn ? chapter.notes.find((n) => n.pending && n.messageId === turn) : undefined;
   const marginal = prev ? Boolean(prev.marginal) : Boolean(owner);
   const closes = marginal && mode === "end" && Boolean(next.trim());
   if (prev && next === prev.text && !closes) return chapter;
   if (prev) blocks[index] = { ...prev, text: next };
-  else blocks.push({ id, voice: "prose", text: next, marginal });
+  else blocks.splice(insertAt(blocks, id), 0, { id, voice: "prose", text: next, marginal });
   const pending = marginal ? owner : undefined;
   const notes =
     pending && next.trim()
       ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: next, pending: !closes } : n))
       : chapter.notes;
-  const footnotes = marginal ? chapter.footnotes : adoptPending(chapter.footnotes, id, next);
+  // Only the last block of the main flow takes a footnote that came before any text.
+  const flow = blocks.filter((b) => !b.marginal);
+  const last = flow[flow.length - 1]?.id === id;
+  const footnotes = marginal || !last ? chapter.footnotes : adoptPending(chapter.footnotes, id, next);
   return { ...chapter, blocks, notes, footnotes };
+}
+
+/**
+ * Where a new text part goes: before the first part of the same message with a
+ * higher ordinal, when one came first, and otherwise at the end.
+ */
+function insertAt(blocks: ProseBlock[], id: string): number {
+  const own = /^(.*):t(\d+)$/.exec(id);
+  if (!own) return blocks.length;
+  const later = blocks.findIndex((b) => {
+    const other = /^(.*):t(\d+)$/.exec(b.id);
+    return Boolean(other && other[1] === own[1] && Number(other[2]) > Number(own[2]));
+  });
+  return later < 0 ? blocks.length : later;
 }
 
 function nameTool(chapter: Chapter, id: string, name: string | undefined): Chapter {
@@ -471,11 +511,35 @@ function anchorFor(chapter: Chapter): { blockId: string; offset: number } {
   return { blockId: last.id, offset: sentenceEnd(last.text) ?? last.text.trimEnd().length };
 }
 
-/** Offset just past the last sentence that has ended, or undefined if none has. */
-function sentenceEnd(text: string): number | undefined {
+/** Words whose full stop is no sentence's end. */
+const ABBREVIATIONS = /^(?:e\.g|i\.e|cf|vs|viz|al|approx|fig|mr|mrs|ms|dr)$/i;
+
+/**
+ * Offset just past the last sentence that has ended, or undefined if none has.
+ * Closing quotes, brackets and markdown emphasis (`**Done.** Next`) belong to
+ * the sentence; the stop of an abbreviation ("e.g. "), an initial, or a list
+ * number at the start of a line ("1. ") does not end one.
+ */
+export function sentenceEnd(text: string): number | undefined {
   let end: number | undefined;
-  for (const match of text.matchAll(/[.!?…]+["'”’)\]]*(?=\s|$)/g)) end = (match.index ?? 0) + match[0].length;
+  for (const match of text.matchAll(/[.!?…]+["'”’)\]*_`]*(?=\s|$)/g)) {
+    const at = match.index ?? 0;
+    if (match[0].startsWith(".") && !/^\.{2,}/.test(match[0]) && !endsSentence(text.slice(0, at))) continue;
+    end = at + match[0].length;
+  }
   return end;
+}
+
+/** Whether a full stop after `before` ends a sentence. */
+function endsSentence(before: string): boolean {
+  const word = /(\S*)$/.exec(before)?.[1] ?? "";
+  const bare = word.replace(/^[("'“‘[*_]+/, "");
+  if (ABBREVIATIONS.test(bare)) return false;
+  // A single letter is an initial ("J. Smith").
+  if (/^\p{L}$/u.test(bare)) return false;
+  // A number alone at the start of a line is a list's ("1. Read the file").
+  if (/^\d+$/.test(bare) && /(^|\n)[ \t]*$/.test(before.slice(0, before.length - word.length))) return false;
+  return true;
 }
 
 /** A footnote that came before any text hangs at the start of the next text part. */
@@ -498,14 +562,3 @@ function joinText(content: unknown): string | undefined {
   return text || undefined;
 }
 
-function recordOf(value: unknown): Data | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Data) : undefined;
-}
-
-function stringOf(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function numberOf(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}

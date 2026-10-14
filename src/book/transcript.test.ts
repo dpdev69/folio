@@ -59,6 +59,26 @@ describe("chapterFromMessages", () => {
     expect(chapterFromMessages(empty("ses_1"), stopped).error).toBeUndefined();
   });
 
+  it("clears an error kept from before when the history shows the last run finished cleanly", () => {
+    const clean = [
+      { id: "msg_u", type: "user", text: "Try it." },
+      { id: "msg_a", type: "assistant", content: [{ type: "text", text: "It works." }] },
+    ];
+    expect(chapterFromMessages({ ...empty("ses_1"), error: "The model is busy." }, clean).error).toBeUndefined();
+    // A run still going may yet fail; and an empty history says nothing either way.
+    expect(chapterFromMessages({ ...empty("ses_1"), busy: true, error: "The model is busy." }, clean).error).toBe("The model is busy.");
+    expect(chapterFromMessages({ ...empty("ses_1"), error: "The model is busy." }, []).error).toBe("The model is busy.");
+  });
+
+  it("takes reasoning leaked at the start of a text part off the page", () => {
+    const read = chapterFromMessages(empty("ses_1"), [
+      { id: "msg_u", type: "user", text: "Go." },
+      { id: "msg_a", type: "assistant", content: [{ type: "text", text: "</think>\n\nDone." }] },
+      { id: "msg_b", type: "assistant", content: [{ type: "text", text: "<think>Let me see.</think>Also done." }] },
+    ]);
+    expect(read.blocks.filter((b) => b.voice === "prose").map((b) => b.text)).toEqual(["Done.", "Also done."]);
+  });
+
   describe("margin notes", () => {
     const note = (id: string, quote: string, prompt: string) =>
       ({ id, type: "user", text: `About this passage:\n\n> ${quote}\n\n${prompt}` }) as const;
@@ -105,6 +125,13 @@ describe("chapterFromMessages", () => {
       const held = { id: "note_1", quote: "the clock was frozen", prompt: "Why freeze it?", kept: true };
       const read = chapterFromMessages({ ...empty("ses_1"), notes: [held] }, history);
       expect(read.notes).toEqual([{ ...held, reply: "So the token's time is fixed.", pending: false, messageId: "msg_u2" }]);
+    });
+
+    it("never opens a note already answered for another question on the same passage", () => {
+      const answered = { id: "note_1", quote: "the clock was frozen", prompt: "Who froze it?", reply: "The test did." };
+      const read = chapterFromMessages({ ...empty("ses_1"), notes: [answered] }, history);
+      expect(read.notes[0]).toEqual(answered);
+      expect(read.notes[1]).toMatchObject({ id: "note-msg_u2", prompt: "Why freeze it?", reply: "So the token's time is fixed." });
     });
 
     it("lets a note that was never answered go, so the next reply stays in the main flow", () => {

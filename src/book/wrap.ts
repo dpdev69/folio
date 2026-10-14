@@ -14,13 +14,19 @@ export type WrappedLine = {
 
 export type Mark = { offset: number; n: number; plateId?: string };
 
+/** The space the page sets between the drop cap and the lines beside it (styles.css `.line.beside`). */
+export const DROP_GAP = 8;
+
+/** A drop cap `lines` tall and `width` wide; the lines beside it also give up `gap` (DROP_GAP by default). */
+export type Drop = { lines: number; width: number; gap?: number };
+
 export function wrapParagraph(opts: {
   text: string;
   measure: Measure;
   width: number;
   italics?: ItalicRange[];
   marks?: Mark[];
-  drop?: { lines: number; width: number };
+  drop?: Drop;
 }): WrappedLine[] {
   const italics = opts.italics ?? [];
   const source = opts.text.replace(/\s+/g, " ").trim();
@@ -35,7 +41,7 @@ export function wrapParagraph(opts: {
   const draft: { text: string; start: number }[] = [];
   let index = 0;
   while (index < words.length) {
-    const limit = drop && draft.length < drop.lines ? Math.max(40, opts.width - drop.width) : opts.width;
+    const limit = drop && draft.length < drop.lines ? Math.max(40, opts.width - drop.width - (drop.gap ?? DROP_GAP)) : opts.width;
     let taken = "";
     let count = 0;
     while (index + count < words.length) {
@@ -96,29 +102,55 @@ type WrapOptions = Parameters<typeof wrapParagraph>[0];
 
 /** Enough paragraphs for a long book; the oldest unused ones go first. */
 const CACHE_LIMIT = 10_000;
-const wrapCache = new WeakMap<Measure, Map<string, WrappedLine[]>>();
+/** Fresh wraps watched for a longer self: the growing paragraph, and a few a footnote just re-marked. */
+const RECENT = 8;
+
+type WrapCache = {
+  entries: Map<string, WrappedLine[]>;
+  /** The paragraphs wrapped afresh most lately, so a longer self of one can take its place. */
+  recent: { key: string; shape: string; text: string }[];
+};
+const wrapCache = new WeakMap<Measure, WrapCache>();
 
 /**
  * wrapParagraph, remembered per measure function. While the press streams,
  * every paragraph but the growing one is found here, so earlier lines are
  * reused rather than measured again. Callers get their own copies.
+ *
+ * The growing paragraph is wrapped afresh on every delta; a new text that
+ * extends one wrapped afresh lately (same width and drop cap) replaces its
+ * entry, so the cache holds the paragraph once rather than every prefix of it.
  */
 export function wrapParagraphCached(opts: WrapOptions): WrappedLine[] {
   let cache = wrapCache.get(opts.measure);
   if (!cache) {
-    cache = new Map();
+    cache = { entries: new Map(), recent: [] };
     wrapCache.set(opts.measure, cache);
   }
+  const { entries } = cache;
+  const shape = JSON.stringify([opts.width, opts.drop ?? null]);
   const key = JSON.stringify([opts.width, opts.drop ?? null, opts.italics ?? [], opts.marks ?? [], opts.text]);
-  let lines = cache.get(key);
+  let lines = entries.get(key);
   if (lines) {
-    cache.delete(key);
+    entries.delete(key);
   } else {
     lines = wrapParagraph(opts);
-    if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+    cache.recent = cache.recent.filter((prior) => {
+      const outgrown = prior.shape === shape && opts.text.startsWith(prior.text);
+      if (outgrown) entries.delete(prior.key);
+      return !outgrown;
+    });
+    cache.recent.push({ key, shape, text: opts.text });
+    if (cache.recent.length > RECENT) cache.recent.shift();
+    if (entries.size >= CACHE_LIMIT) entries.delete(entries.keys().next().value!);
   }
-  cache.set(key, lines);
+  entries.set(key, lines);
   return lines.map(copyLine);
+}
+
+/** How many paragraphs the cache holds for this measure (for tests). */
+export function wrapCacheSize(measure: Measure): number {
+  return wrapCache.get(measure)?.entries.size ?? 0;
 }
 
 function copyLine(line: WrappedLine): WrappedLine {

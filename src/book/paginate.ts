@@ -1,6 +1,7 @@
 import type { Chapter, Flow, Footnote } from "./model";
 import { toProse, type ItalicRange } from "./emphasis";
 import { wrapParagraphCached, type Measure, type WrappedLine } from "./wrap";
+import { shownProse } from "./think";
 
 export type LaidLine = WrappedLine & {
   blockId: string;
@@ -32,6 +33,8 @@ export function paginateChapter(
     linesPerPage: number;
     dropLines: number;
     dropWidth: number;
+    /** The gap between the drop cap and the lines beside it; DROP_GAP (8) by default, as styles.css sets it. */
+    dropGap?: number;
     /** Forced breaks, used by the sample so scenes match the mockups. */
     breaksBefore?: string[];
     /**
@@ -55,16 +58,45 @@ export function paginateChapter(
   };
 
   /**
-   * Lines the page being written can hold with these footnotes at its foot.
+   * Lines the foot of the page being written takes for these footnotes.
    * A right page also carries the slip when its spread footnotes a plate.
    */
-  const room = (notes: Footnote[]): number => {
-    if (!opts.footLines) return opts.linesPerPage;
+  const foot = (notes: Footnote[]): number => {
+    if (!opts.footLines) return 0;
     const right = pages.length % 2 === 1;
     const plated = (list: Footnote[]) => list.some((note) => note.plateId);
     const slip = right && (plated(notes) || plated(pages[pages.length - 1]?.footnotes ?? [])) ? 1 : 0;
-    if (!notes.length && !slip) return opts.linesPerPage;
-    return Math.max(1, opts.linesPerPage - opts.footLines(notes, slip));
+    if (!notes.length && !slip) return 0;
+    return opts.footLines(notes, slip);
+  };
+
+  /** Lines the page being written can hold with these footnotes at its foot. */
+  const room = (notes: Footnote[]): number => Math.max(1, opts.linesPerPage - foot(notes));
+
+  /**
+   * A pile of footnotes on one line can be more than a page holds even with the
+   * line alone on it. The footnotes that do not fit go on at the foot of the
+   * next page, in order, as a book carries a long note over; the line keeps its
+   * marks and at least its first footnote.
+   */
+  const spill = () => {
+    while (current.footnotes.length > 1 && current.lines.length + foot(current.footnotes) > opts.linesPerPage) {
+      const over: Footnote[] = [];
+      while (current.footnotes.length > 1 && current.lines.length + foot(current.footnotes) > opts.linesPerPage) {
+        over.unshift(current.footnotes.pop()!);
+      }
+      flush();
+      current.footnotes = over;
+    }
+  };
+
+  /** Footnotes of a block with no text yet: they hang on the next line laid, or at the end. */
+  let orphans: Footnote[] = [];
+  const hang = (line: LaidLine, notes: Footnote[]) => {
+    for (const note of notes) {
+      if (!line.notes.includes(note.n)) line.notes.push(note.n);
+      if (note.plateId && !line.plates.includes(note.plateId)) line.plates.push(note.plateId);
+    }
   };
 
   /**
@@ -113,6 +145,9 @@ export function paginateChapter(
     }
     const parsed = toProse(item.text);
     const paragraphs = splitParagraphs(parsed.text);
+    // Marks count characters of the block as written; the page counts them in the plain text.
+    const plainMarks = item.marks.map((mark) => ({ ...mark, offset: plainOffset(item.text, mark.offset) }));
+    const lastParagraph = paragraphs[paragraphs.length - 1];
     paragraphs.forEach((paragraph, paragraphIndex) => {
       if (paragraphIndex > 0) pushGap(item.id, item.voice);
       const useDrop = item.dropCap && !dropUsed && item.voice === "prose" && paragraphIndex === 0;
@@ -124,46 +159,59 @@ export function paginateChapter(
         width: opts.width,
         // A mark belongs to the first paragraph that ends at or after it, so one that
         // falls before the text or between paragraphs is not left to ride the tail.
-        marks: item.marks
+        // A mark past the end of the text so far stays with the last paragraph, at its end.
+        marks: plainMarks
           .filter((mark) => {
             const previous = paragraphs[paragraphIndex - 1];
             const afterPrevious = !previous || mark.offset > previous.start + previous.text.length;
-            return afterPrevious && mark.offset <= paragraph.start + paragraph.text.length;
+            const last = paragraph === lastParagraph;
+            return afterPrevious && (last || mark.offset <= paragraph.start + paragraph.text.length);
           })
-          .map((mark) => ({ ...mark, offset: Math.max(0, mark.offset - paragraph.start) })),
-        drop: useDrop ? { lines: opts.dropLines, width: opts.dropWidth } : undefined,
+          .map((mark) => ({ ...mark, offset: Math.min(paragraph.text.length, Math.max(0, mark.offset - paragraph.start)) })),
+        drop: useDrop ? { lines: opts.dropLines, width: opts.dropWidth, gap: opts.dropGap } : undefined,
       });
       let plainStart = paragraph.start;
       wrapped.forEach((line, index) => {
-        const notes = line.notes
-          .map((n) => chapter.footnotes.find((f) => f.n === n))
-          .filter((f): f is Footnote => Boolean(f));
+        const notes = [
+          ...orphans,
+          ...line.notes.map((n) => chapter.footnotes.find((f) => f.n === n)).filter((f): f is Footnote => Boolean(f)),
+        ];
         // A line that brings a footnote needs room for both, or it starts the next page.
         const fresh = notes.filter((note) => !current.footnotes.some((f) => f.id === note.id));
         if (current.lines.length >= room([...current.footnotes, ...fresh])) flush();
-        current.lines.push({
+        const laid: LaidLine = {
           ...line,
           blockId: item.id,
           voice: item.voice,
           plainStart,
           besideDrop: line.besideDrop && index < opts.dropLines,
-        });
+        };
+        if (orphans.length) {
+          hang(laid, orphans);
+          orphans = [];
+        }
+        current.lines.push(laid);
         for (const note of notes) {
           if (!current.footnotes.some((f) => f.id === note.id)) current.footnotes.push(note);
         }
+        spill();
         plainStart += line.text.length + 1;
       });
     });
-    const placed = new Set<string>();
-    for (const page of pages) for (const note of page.footnotes) placed.add(note.id);
-    for (const note of current.footnotes) placed.add(note.id);
-    for (const note of chapter.footnotes.filter((f) => f.blockId === item.id && !placed.has(f.id))) {
-      current.footnotes.push(note);
-      const host = [...current.lines].reverse().find((line) => !line.gap);
-      if (host && !host.notes.includes(note.n)) host.notes.push(note.n);
-      if (host && note.plateId && !host.plates.includes(note.plateId)) host.plates.push(note.plateId);
+    // A block with no text to hang its marks on passes them to the next line laid.
+    if (!paragraphs.length) {
+      orphans = [...orphans, ...chapter.footnotes.filter((f) => f.blockId === item.id && !orphans.includes(f))];
     }
     settle();
+  }
+  if (orphans.length) {
+    // Nothing followed: the last line laid takes them, or the foot of the page alone.
+    const host = [...current.lines].reverse().find((line) => !line.gap);
+    if (host) hang(host, orphans);
+    for (const note of orphans) if (!current.footnotes.some((f) => f.id === note.id)) current.footnotes.push(note);
+    orphans = [];
+    settle();
+    spill();
   }
   flush();
   return pages;
@@ -188,6 +236,17 @@ export function paginateBook(
   }
   if (pages.length % 2 === 1) pages.push(blank(pages[pages.length - 1]?.chapterId ?? "end"));
   return { pages, chapterStart };
+}
+
+/**
+ * Where a character offset into a block as written falls in its plain text
+ * (emphasis marks, headings and list markers taken out). Only the text before
+ * the offset decides, so a mark keeps its place while the block grows.
+ */
+function plainOffset(text: string, offset: number): number {
+  if (offset <= 0) return 0;
+  if (offset >= text.length) return toProse(text).text.length + (offset - text.length);
+  return toProse(text.slice(0, offset)).text.length;
 }
 
 function blank(chapterId: string): LaidPage {
@@ -233,11 +292,12 @@ export function flowOf(chapter: Chapter, breaksBefore: string[]): Flow[] {
       kind: "prose",
       id: block.id,
       voice: block.voice,
-      text: block.text,
+      // A part that has only begun a reasoning tag shows nothing until it is known.
+      text: block.voice === "prose" ? shownProse(block.text) : block.text,
       dropCap: drop && block.voice === "prose",
       marks,
     });
-    if (block.voice === "prose" && block.text.trim()) drop = false;
+    if (block.voice === "prose" && shownProse(block.text).trim()) drop = false;
   }
   return flow;
 }

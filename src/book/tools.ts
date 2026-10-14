@@ -1,6 +1,7 @@
 /** Plain-language footnotes. Tool calls never sit in the prose. */
 import { plateLines } from "./diff";
 import { toRoman } from "./model";
+import { firstString } from "./values";
 
 export type ToolLike = {
   tool: string;
@@ -41,12 +42,13 @@ export function footnoteSentence(
     // A long command (an inline script) is clipped; the footnote names it, it does not reprint it.
     const what = title || (command ? clip(command, 64) : "a command");
     if (tool.status === "running" || tool.status === "pending") {
-      return { text: `Running ${what}…`, opensPlate: false };
+      return { text: trailing(`Running ${what}`), opensPlate: false };
     }
-    if (tool.status === "error") return { text: `${what} failed${reason(tool.error)}.`, opensPlate: false };
+    if (tool.status === "error") return { text: sentence(`${what} failed${reason(tool.error)}`), opensPlate: false };
     const detail = summarizeOutput(tool.output);
-    const body = `Ran ${what}${detail ? `. ${detail}` : ""}${time}`;
-    return { text: detail && !time ? sentence(body) : `${body}.`, opensPlate: false };
+    // A clipped command ends in "…", which also closes the sentence it ends.
+    const ran = detail && !/[.?!…]$/.test(what) ? `Ran ${what}. ${detail}` : `Ran ${what}${detail ? ` ${detail}` : ""}`;
+    return { text: time ? `${ran}${time}.` : sentence(ran), opensPlate: false };
   }
 
   if (name === "read") {
@@ -65,7 +67,7 @@ export function footnoteSentence(
 
   if (isEdit(name)) {
     const which = file ?? title ?? "a file";
-    if (tool.status === "error") return { text: `The edit to ${which} failed${reason(tool.error)}.`, opensPlate: false };
+    if (tool.status === "error") return { text: sentence(`The edit to ${which} failed${reason(tool.error)}`), opensPlate: false };
     if (tool.status === "running" || tool.status === "pending") {
       return { text: `Editing ${which}…`, opensPlate: true };
     }
@@ -85,7 +87,7 @@ export function footnoteSentence(
   if (name === "webfetch") {
     const url = firstString(tool.input, ["url"]) ?? "a page";
     if (tool.status === "running" || tool.status === "pending") return { text: `Fetching ${url}…`, opensPlate: false };
-    if (tool.status === "error") return { text: `Could not fetch ${url}${reason(tool.error)}.`, opensPlate: false };
+    if (tool.status === "error") return { text: sentence(`Could not fetch ${url}${reason(tool.error)}`), opensPlate: false };
     return { text: `Fetched ${url}.`, opensPlate: false };
   }
 
@@ -97,18 +99,33 @@ export function footnoteSentence(
     return { text: `Searched the web for ${query}.`, opensPlate: false };
   }
 
-  const label = title || tool.tool;
-  if (tool.status === "error") return { text: `${label} failed.`, opensPlate: false };
-  if (tool.status === "running" || tool.status === "pending") return { text: `${label}…`, opensPlate: false };
-  return { text: `${label}.`, opensPlate: false };
+  if (title) {
+    if (tool.status === "error") return { text: sentence(`${title} failed${reason(tool.error)}`), opensPlate: false };
+    if (tool.status === "running" || tool.status === "pending") return { text: trailing(title), opensPlate: false };
+    return { text: sentence(title), opensPlate: false };
+  }
+  // A tool Folio has no words for is named, never shown as a bare "tool…".
+  const known = name && name !== "tool" ? `the ${tool.tool.trim()} tool` : "a tool";
+  if (tool.status === "error") return { text: sentence(`${capital(known)} failed${reason(tool.error)}`), opensPlate: false };
+  if (tool.status === "running" || tool.status === "pending") return { text: `Using ${known}…`, opensPlate: false };
+  return { text: `Used ${known}.`, opensPlate: false };
+}
+
+function capital(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** End with an ellipsis, not a second one after a clipped word. */
+function trailing(text: string): string {
+  return text.endsWith("…") ? text : `${text}…`;
 }
 
 function declinedSentence(name: string, file: string | undefined, command: string | undefined): string {
   if (isEdit(name)) return `The edit to ${file ?? "a file"} was declined.`;
-  if (name === "bash" || name === "shell") return `The request to run ${command ?? "a command"} was declined.`;
+  if (name === "bash" || name === "shell") return `The request to run ${command ? clip(command, 64) : "a command"} was declined.`;
   if (name === "read") return `The request to read ${file ?? "a file"} was declined.`;
   if (name === "question") return "The question was set aside.";
-  return `The ${name} call was declined.`;
+  return name && name !== "tool" ? `The ${name} call was declined.` : "A tool call was declined.";
 }
 
 /** "4 lines added", "2 lines removed and 1 added", from the patch counts or the edit's own strings. */
@@ -129,7 +146,7 @@ function editCounts(tool: ToolLike): string {
   return "";
 }
 
-/** ": the reason", without a doubled full stop. */
+/** ": the reason", without a doubled full stop; a clipped reason keeps its ellipsis. */
 function reason(error: string | undefined): string {
   const text = error ? clip(error).replace(/[.\s]+$/, "") : "";
   return text ? `: ${text}` : "";
@@ -157,15 +174,6 @@ export function bookPath(file: string | undefined, directory: string | undefined
   if (path === root) return undefined;
   if (path.startsWith(`${root}/`)) return path.slice(root.length + 1);
   return path.split("/").pop() || file;
-}
-
-function firstString(input: Record<string, unknown> | undefined, keys: string[]): string | undefined {
-  if (!input) return undefined;
-  for (const key of keys) {
-    const value = input[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
 }
 
 function lineSpan(input: Record<string, unknown> | undefined): string {

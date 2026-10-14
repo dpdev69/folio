@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEvent, appendPrompt, MODEL_GONE, renameBlock, type Frame } from "./events";
+import { applyEvent, appendPrompt, MODEL_GONE, renameBlock, sentenceEnd, type Frame } from "./events";
 import { parsePatch, reversePatch } from "./diff";
 import { applyDiff } from "./plates";
 import { quillKey } from "./quill";
@@ -218,13 +218,26 @@ describe("the session diff (folio.diff)", () => {
   });
 
   it("re-words the footnote of a plate the diff widened, so the two agree", () => {
-    const chapter = diffed(secondTurn(2), ["wave1", "wave2"]);
+    // One edit in the turn, but the turn's diff also holds a line a shell command wrote.
+    const chapter = diffed(secondTurn(1), ["wave1", "wave2"]);
+    expect(chapter.plates.map((p) => [p.id, p.additions])).toEqual([
+      ["plate-call-816f41ab-c832-4c99-90c1-7a0d47056457", 4],
+      ["plate-call-w1", 2],
+    ]);
+    expect(chapter.footnotes.find((f) => f.id === "call-w1")?.text).toBe("Edited src/greet.ts, 2 lines added. See Plate II →");
+  });
+
+  it("keeps each of two edits to one file in a turn showing its own change, not the turn's", () => {
+    const before = secondTurn(2);
+    const chapter = diffed(before, ["wave1", "wave2"]);
     expect(chapter.plates.map((p) => [p.id, p.additions])).toEqual([
       ["plate-call-816f41ab-c832-4c99-90c1-7a0d47056457", 4],
       ["plate-call-w1", 1],
-      ["plate-call-w2", 2],
+      ["plate-call-w2", 1],
     ]);
-    expect(chapter.footnotes.find((f) => f.id === "call-w2")?.text).toBe("Edited src/greet.ts, 2 lines added. See Plate III →");
+    expect(chapter.plates[2].lines).toEqual(parsePatch(patch(["wave2"])));
+    expect(chapter.plates[2]).toEqual(before.chapters[0].plates[2]);
+    expect(chapter.footnotes.find((f) => f.id === "call-w2")?.text).toBe("Edited src/greet.ts, 1 line added. See Plate III →");
     expect(chapter.footnotes.find((f) => f.id === "call-w1")?.text).toBe("Edited src/greet.ts, 1 line added. See Plate II →");
   });
 
@@ -914,9 +927,140 @@ describe("following the tail", () => {
     expect(followTail(before, [...before, "iii", "iii"], 2)).toBeNull();
   });
 
-  it("stays when the chapter grew but the next spread belongs to another chapter", () => {
+  it("stays when the chapter grew onto the blank page of the reader's own spread", () => {
+    // Chapter i ends on a left page; the blank right page beside it is laid as chapter ii's, which starts on page 4.
     const middle = ["i", "i", "i", "ii", "ii", "ii"];
-    const grown = ["i", "i", "i", "i", "ii", "ii", "ii", "ii"];
+    const grown = ["i", "i", "i", "i", "ii", "ii"];
     expect(followTail(middle, grown, 1)).toBeNull();
+  });
+});
+
+describe("following the reader's prose as the press writes it", () => {
+  const AID = "msg_a";
+  const delta = (ordinal: number, text: string) => ev("session.text.delta", { assistantMessageID: AID, ordinal, delta: text });
+  const started = (ordinal: number) => ev("session.text.started", { assistantMessageID: AID, ordinal });
+  const tool = (id: string, name?: string): Frame[] => [
+    ...(name ? [ev("session.tool.input.started", { assistantMessageID: AID, id, name })] : []),
+    ev("session.tool.called", { assistantMessageID: AID, id, input: { command: "npm test" } }),
+  ];
+
+  it("lets only the last block take a footnote that came before any text", () => {
+    let next = play(book(), [started(0), started(1), ...tool("call-1", "shell")]);
+    expect(next.chapters[0].footnotes[0].blockId).toBe("pending");
+    next = applyEvent(next, delta(0, "An earlier part."));
+    expect(next.chapters[0].footnotes[0].blockId).toBe("pending");
+    next = applyEvent(next, delta(1, "The suite ran."));
+    expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "msg_a:t1", offset: 0 });
+  });
+
+  it("sets a part that arrives early after the parts before it, so no hole opens", () => {
+    const next = play(book(), [delta(2, "Third."), delta(0, "First."), delta(1, "Second."), delta(2, " Still third.")]);
+    expect(next.chapters[0].blocks.map((b) => [b.id, b.text])).toEqual([
+      ["msg_a:t0", "First."],
+      ["msg_a:t1", "Second."],
+      ["msg_a:t2", "Third. Still third."],
+    ]);
+    // A later message's part still goes after them all.
+    const later = applyEvent(next, ev("session.text.delta", { assistantMessageID: "msg_b", ordinal: 0, delta: "Next." }));
+    expect(later.chapters[0].blocks.map((b) => b.id).at(-1)).toBe("msg_b:t0");
+  });
+
+  it("names a tool it has no words for in a sentence", () => {
+    const next = play(book(), [delta(0, "Working."), ...tool("call-x", "todowrite"), ...tool("call-y")]);
+    expect(next.chapters[0].footnotes.map((f) => f.text)).toEqual(["Using the todowrite tool…", "Using a tool…"]);
+    const done = applyEvent(next, ev("session.tool.success", { assistantMessageID: AID, id: "call-x", content: [] }));
+    expect(done.chapters[0].footnotes[0].text).toBe("Used the todowrite tool.");
+  });
+
+  it("takes a stray </think> and a leading reasoning block off the prose, even split across deltas", () => {
+    let next = play(book(), [delta(0, "</thi"), delta(0, "nk>\n\nDone."), delta(1, "<think>Weigh it"), delta(1, " up.</think>"), delta(1, "Answer.")]);
+    expect(next.chapters[0].blocks.map((b) => b.text)).toEqual(["Done.", "Answer."]);
+    next = applyEvent(next, ev("session.text.ended", { assistantMessageID: AID, ordinal: 1, text: "<think>Weigh it up.</think>Answer." }));
+    expect(next.chapters[0].blocks.map((b) => b.text)).toEqual(["Done.", "Answer."]);
+  });
+});
+
+describe("sentence ends", () => {
+  it("does not end a sentence at an abbreviation, an initial or a list number", () => {
+    expect(sentenceEnd("Use a flag, e.g. --watch")).toBeUndefined();
+    expect(sentenceEnd("That is, i.e. the same")).toBeUndefined();
+    expect(sentenceEnd("1. Read the file")).toBeUndefined();
+    expect(sentenceEnd("Steps:\n2. Run it")).toBeUndefined();
+    expect(sentenceEnd("Ask J. Smith")).toBeUndefined();
+  });
+
+  it("ends a sentence after closing emphasis, and after a number that ends one", () => {
+    expect(sentenceEnd("**Done.** Next")).toBe("**Done.**".length);
+    expect(sentenceEnd("It is *fixed.* Then")).toBe("It is *fixed.*".length);
+    expect(sentenceEnd("I bumped it to version 2. Then I ran")).toBe("I bumped it to version 2.".length);
+    expect(sentenceEnd("Use a flag, e.g. --watch. Then")).toBe("Use a flag, e.g. --watch.".length);
+    expect(sentenceEnd("Why? Because")).toBe("Why?".length);
+  });
+});
+
+describe("renaming a prompt line", () => {
+  const seeded = (): Book => ({ ...book(), chapters: [appendPrompt(book().chapters[0], "Edit a.", "local-1")] });
+  const patch = "--- a/a.ts\n+++ b/a.ts\n@@ -1,1 +1,2 @@\n a\n+b\n";
+
+  it("never leaves two blocks with one id", () => {
+    let chapter = seeded().chapters[0];
+    chapter = { ...chapter, blocks: [...chapter.blocks, { id: "msg_u1", voice: "ink", text: "Edit a. " }] };
+    chapter = { ...chapter, footnotes: [{ id: "f", n: 1, blockId: "local-1", offset: 2, text: "Ran it." }] };
+    const renamed = renameBlock(chapter, "local-1", "msg_u1");
+    expect(renamed.blocks.map((b) => b.id)).toEqual(["msg_u1"]);
+    expect(renamed.footnotes[0].blockId).toBe("msg_u1");
+  });
+
+  it("gives a diff plate named by the local turn the real turn's id, and keeps its status", () => {
+    let next = play(seeded(), [
+      ev("session.step.started", { assistantMessageID: "msg_a1" }),
+      ev("folio.diff", { diff: [{ file: "a.ts", patch, status: "modified", additions: 1, deletions: 0 }] }),
+    ]);
+    const plate = next.chapters[0].plates[0];
+    expect(plate.id).toBe("diff-a.ts@local-1");
+    next = { ...next, chapters: [{ ...next.chapters[0], plates: [{ ...plate, status: "accepted" }], footnotes: [{ id: "f", n: 1, blockId: "msg_a1:t0", offset: 0, text: "Edited a.ts.", plateId: plate.id }] }] };
+    const renamed = renameBlock(next.chapters[0], "local-1", "msg_u1");
+    expect(renamed.plates[0]).toMatchObject({ id: "diff-a.ts@msg_u1", turnMessageId: "msg_u1", status: "accepted" });
+    expect(renamed.footnotes[0].plateId).toBe("diff-a.ts@msg_u1");
+    // The diff read again for the real turn finds the same plate, not a second one.
+    const again = applyEvent({ ...next, chapters: [renamed] }, ev("folio.diff", { diff: [{ file: "a.ts", patch, status: "modified" }], turnMessageId: "msg_u1" }));
+    expect(again.chapters[0].plates.map((p) => [p.id, p.status])).toEqual([["diff-a.ts@msg_u1", "accepted"]]);
+  });
+
+  it("leaves a tool plate's id alone, since it names the call, not the turn", () => {
+    const next = play(seeded(), [
+      ev("session.step.started", { assistantMessageID: "msg_a1" }),
+      ev("session.tool.input.started", { assistantMessageID: "msg_a1", id: "call-1", name: "edit" }),
+      ev("session.tool.called", { assistantMessageID: "msg_a1", id: "call-1", input: { path: "a.ts", oldString: "a", newString: "a\nb" } }),
+    ]);
+    const renamed = renameBlock(next.chapters[0], "local-1", "msg_u1");
+    expect(renamed.plates[0]).toMatchObject({ id: "plate-call-1", turnMessageId: "msg_u1" });
+    expect(renamed.footnotes[0].plateId).toBe("plate-call-1");
+  });
+});
+
+describe("a plate from strings, then the press's patch", () => {
+  const AID = "msg_a";
+  // The edit's own strings sit at line 1; the real file has them at line 12.
+  const patch = "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -12,2 +12,3 @@\n one\n+2\n two\n";
+  const called = ev("session.tool.called", { assistantMessageID: AID, id: "call-1", input: { path: "src/a.ts", oldString: "one\ntwo", newString: "one\n2\ntwo" } });
+  const asked = ev("permission.asked", {
+    id: "per_1",
+    action: "edit",
+    resources: ["src/a.ts"],
+    source: { type: "tool", id: "call-1" },
+    metadata: { files: [{ file: "src/a.ts", patch }] },
+  });
+  const started = ev("session.tool.input.started", { assistantMessageID: AID, id: "call-1", name: "edit" });
+
+  it("numbers its lines from the patch once an ask brings one", () => {
+    const next = play(book(), [started, called, asked]);
+    expect(next.chapters[0].plates[0].lines).toEqual(parsePatch(patch));
+    expect(next.chapters[0].plates[0].lines.find((l) => l.kind === "add")?.newNo).toBe(13);
+  });
+
+  it("keeps the patch's lines when the call frame lands after the ask", () => {
+    const next = play(book(), [started, asked, called]);
+    expect(next.chapters[0].plates[0]).toMatchObject({ patch, lines: parsePatch(patch) });
   });
 });

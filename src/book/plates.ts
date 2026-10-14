@@ -1,5 +1,6 @@
-import { parsePatch, plateLines } from "./diff";
+import { parsePatch, plateLines, PLATE_LINES } from "./diff";
 import type { Chapter, Plate, PlateLine, ToolCall } from "./model";
+import { firstString, recordOf } from "./values";
 
 /** A changed file as opencode 2.0 reports it, in tool metadata and in the session diff. */
 export type FileDiff = { file: string; patch?: string; status?: string; additions?: number; deletions?: number };
@@ -13,6 +14,9 @@ export function filesOf(metadata: unknown): FileDiff[] {
 /**
  * The plate of an edit or write. Its lines come from the tool's patch once it
  * has one, and from the edit's own strings until then, so it is never empty.
+ * A patch the plate already holds (the one a permission ask proposed) keeps
+ * setting its lines, so a later call frame with only the strings cannot take
+ * the real line numbers away again.
  */
 export function toolPlate(
   plates: Plate[],
@@ -27,16 +31,21 @@ export function toolPlate(
   let lines: PlateLine[];
   let additions: number;
   let deletions: number;
+  const patch = entry?.patch ?? existing?.patch;
   if (entry?.patch) {
     lines = parsePatch(entry.patch);
     additions = entry.additions ?? count(lines, "add");
     deletions = entry.deletions ?? count(lines, "del");
+  } else if (patch && existing) {
+    lines = parsePatch(patch);
+    additions = existing.additions;
+    deletions = existing.deletions;
   } else {
     const before = firstString(call.input, ["oldString", "old_string"]) ?? "";
     const after = firstString(call.input, ["newString", "new_string", "content"]) ?? "";
     if (!before && !after) return { plates, plate: existing };
     const full = plateLines(before, after, { context: 1, maxLines: Infinity });
-    lines = plateLines(before, after, { context: 1, maxLines: 41 });
+    lines = plateLines(before, after, { context: 1, maxLines: PLATE_LINES });
     additions = count(full, "add");
     deletions = count(full, "del");
   }
@@ -51,7 +60,7 @@ export function toolPlate(
     title: basename(file),
     caption: captionFor(entry?.status, file),
     lines,
-    patch: entry?.patch ?? existing?.patch,
+    patch,
     additions,
     deletions,
     ...changeOf(entry?.status ?? existing?.change),
@@ -89,6 +98,10 @@ export function dropPlate(plates: Plate[], id: string): Plate[] {
  * has none and is the turn's only plate for the file (with two, the turn's
  * patch is neither one's, so Reject refuses), and an `unscoped` diff (the
  * whole session's) fills none at all.
+ *
+ * With two or more plates for a file in the turn, a plate that holds its own
+ * patch also keeps its own lines and counts: the turn's patch would show A+B
+ * on a plate whose Reject undoes only B.
  */
 export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string | undefined, unscoped = false): Chapter {
   if (!Array.isArray(raw)) return chapter;
@@ -102,6 +115,7 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
     // The turn's patch covers every edit to the file in the turn; it is a plate's own only if that plate is the only one.
     const owns = !unscoped && same.length <= 1;
     if (!existing && !lines.length) continue;
+    if (existing?.patch && same.length > 1) continue;
     const id = existing?.id ?? diffPlateId(diff.file, turnMessageId);
     const plate: Plate = {
       id,
@@ -160,15 +174,3 @@ function count(lines: PlateLine[], kind: PlateLine["kind"]): number {
   return lines.filter((line) => line.kind === kind).length;
 }
 
-function firstString(input: Record<string, unknown> | undefined, keys: string[]): string | undefined {
-  if (!input) return undefined;
-  for (const key of keys) {
-    const value = input[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return undefined;
-}
-
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
-}

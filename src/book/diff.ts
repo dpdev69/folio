@@ -13,10 +13,16 @@ export function shownLineNumber(line: PlateLine): number | undefined {
   return line.kind === "del" ? line.oldNo : (line.newNo ?? line.oldNo);
 }
 
-/** A small line diff. Long files are truncated before the comparison. */
+/** The most lines a plate shows, its closing fold or ellipsis line included. */
+export const PLATE_LINES = 42;
+
+/**
+ * A small line diff. Long files are truncated before the comparison; the
+ * plate is capped at `maxLines`, its last line a fold note when cut short.
+ */
 export function plateLines(before: string, after: string, opts?: { context?: number; maxLines?: number }): PlateLine[] {
   const context = opts?.context ?? 1;
-  const maxLines = opts?.maxLines ?? 48;
+  const maxLines = opts?.maxLines ?? PLATE_LINES;
   const a = cap(before, 500);
   const b = cap(after, 500);
   const rows = diff(a, b);
@@ -29,7 +35,7 @@ export function plateLines(before: string, after: string, opts?: { context?: num
   });
   if (lines.length <= maxLines) return lines;
   return [
-    ...lines.slice(0, maxLines),
+    ...lines.slice(0, maxLines - 1),
     { kind: "context", text: "The rest of this plate is folded.", oldNo: undefined, newNo: undefined },
   ];
 }
@@ -109,7 +115,7 @@ const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
  * plate is capped at `maxLines`, its last line an ellipsis when cut short.
  */
 export function parsePatch(patch: string, opts?: { maxLines?: number }): PlateLine[] {
-  const maxLines = opts?.maxLines ?? 42;
+  const maxLines = opts?.maxLines ?? PLATE_LINES;
   const lines: PlateLine[] = [];
   let oldNo = 0;
   let newNo = 0;

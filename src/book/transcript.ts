@@ -1,8 +1,7 @@
 import { addInk, errorSentence, setText, stepStarted, textBlockId, toolCalled, toolFailed, toolSucceeded } from "./events";
 import type { Chapter } from "./model";
 import { parseNote } from "./notes";
-
-type Data = Record<string, unknown>;
+import { recordOf, stringOf, type Data } from "./values";
 
 /**
  * Set a chapter from its history, `GET /api/session/{id}/message?order=asc`.
@@ -14,6 +13,7 @@ type Data = Record<string, unknown>;
 export function chapterFromMessages(chapter: Chapter, messages: unknown[], directory?: string): Chapter {
   let next: Chapter = { ...chapter, blocks: [], footnotes: [], plates: [], turns: undefined, calls: undefined };
   let lastError: unknown;
+  let answered = false;
   // The note a margin question from history opened, until its reply closes it.
   let opened: string | undefined;
   for (const raw of messages) {
@@ -32,6 +32,7 @@ export function chapterFromMessages(chapter: Chapter, messages: unknown[], direc
     } else if (message.type === "assistant") {
       next = assistant(stepStarted(next, id), id, message.content, directory);
       lastError = message.error;
+      answered = true;
     }
     // idle, synthetic, compaction and the rest are not set in type.
   }
@@ -39,16 +40,20 @@ export function chapterFromMessages(chapter: Chapter, messages: unknown[], direc
   if (opened && !chapter.notes.some((n) => n.id === opened && n.pending)) next = letGo(next, opened);
   const error = recordOf(lastError);
   if (!next.busy && error && error.type !== "aborted") next = { ...next, error: errorSentence(error) };
+  // The last run finished without an error, so an error kept from before no longer stands.
+  else if (!next.busy && answered && next.error !== undefined) next = { ...next, error: undefined };
   return next;
 }
 
 /**
- * A margin question read from history: wait on the note for the same passage,
- * or make that note again, so the reply that follows goes to the margin.
+ * A margin question read from history: wait on the note for the same passage
+ * and question, or else on a note for the passage that has no reply yet, or
+ * make that note again, so the reply that follows goes to the margin. A note
+ * already answered for another question is never opened again.
  */
 function openNote(chapter: Chapter, messageId: string, asked: { quote: string; prompt: string }): { chapter: Chapter; id: string } {
   const same = chapter.notes.filter((n) => n.quote === asked.quote);
-  const held = same.find((n) => n.prompt === asked.prompt) ?? same[0];
+  const held = same.find((n) => n.prompt === asked.prompt) ?? same.find((n) => n.reply === undefined);
   if (held) {
     const notes = chapter.notes.map((n) => (n.id === held.id ? { ...n, pending: true, messageId } : n));
     return { chapter: { ...chapter, notes }, id: held.id };
@@ -90,10 +95,3 @@ function tool(chapter: Chapter, messageId: string, item: Data, directory?: strin
   return called;
 }
 
-function recordOf(value: unknown): Data | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Data) : undefined;
-}
-
-function stringOf(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}

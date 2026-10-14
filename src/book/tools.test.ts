@@ -135,8 +135,35 @@ describe("shell footnotes from a live run", () => {
     const command = `node --input-type=module -e '${"const x = 1; ".repeat(20)}'`;
     const text = footnoteSentence(shell(command, "")).text;
     expect(text.startsWith("Ran node --input-type=module -e 'const x = 1;")).toBe(true);
-    expect(text.endsWith("….")).toBe(true);
+    expect(text.endsWith("…")).toBe(true);
+    expect(text).not.toContain("….");
     expect(text.length).toBeLessThanOrEqual(80);
+  });
+
+  it("never doubles the stop after a clipped command or reason", () => {
+    const command = `node -e '${"let y = 2; ".repeat(20)}'`;
+    const running = footnoteSentence({ tool: "bash", input: { command }, status: "running" }).text;
+    expect(running.endsWith("…")).toBe(true);
+    expect(running).not.toContain("……");
+    const failed = footnoteSentence({ tool: "bash", input: { command: "npm test" }, status: "error", error: "x".repeat(300) }).text;
+    expect(failed.startsWith("npm test failed: xxx")).toBe(true);
+    expect(failed.endsWith("…")).toBe(true);
+    expect(failed).not.toContain("….");
+    const said = footnoteSentence(shell(command, "All good.")).text;
+    expect(said).not.toMatch(/…\./);
+    expect(said.endsWith("All good.")).toBe(true);
+  });
+});
+
+describe("a tool Folio has no words for", () => {
+  it("is named in a sentence, never as a bare tool…", () => {
+    const todo = (status: "running" | "completed" | "error") => footnoteSentence({ tool: "todowrite", input: {}, status }).text;
+    expect(todo("running")).toBe("Using the todowrite tool…");
+    expect(todo("completed")).toBe("Used the todowrite tool.");
+    expect(todo("error")).toBe("The todowrite tool failed.");
+    expect(footnoteSentence({ tool: "tool", input: {}, status: "running" }).text).toBe("Using a tool…");
+    expect(footnoteSentence({ tool: "tool", input: {}, status: "completed" }).text).toBe("Used a tool.");
+    expect(footnoteSentence({ tool: "tool", input: {}, status: "error", declined: true }).text).toBe("A tool call was declined.");
   });
 });
 

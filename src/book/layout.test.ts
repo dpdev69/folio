@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { committedPrefix, paginateChapter, type LaidLine, type LaidPage } from "./paginate";
 import { sampleBook, SAMPLE_BREAKS } from "./sample";
-import { revealNextLine, wrapParagraph } from "./wrap";
+import { DROP_GAP, revealNextLine, wrapCacheSize, wrapParagraph, wrapParagraphCached } from "./wrap";
 import type { Book, Chapter, Footnote } from "./model";
 import { applyEvent } from "./events";
 
@@ -309,5 +309,117 @@ describe("adopted footnotes", () => {
     expect(steps[0].footnotes[0]).toMatchObject({ blockId: "m:t0", offset: 0 });
     for (const step of steps) expect(where(step)).toEqual([[0, 0]]);
     expect(paginateChapter(steps[steps.length - 1], opts).length).toBeGreaterThan(1);
+  });
+});
+
+describe("the wrap cache while a paragraph grows", () => {
+  it("holds the growing paragraph once, not every prefix of it", () => {
+    const measure = (text: string) => text.length;
+    const settled = "The test failed only on the build server.";
+    let text = "";
+    for (let i = 0; i < 200; i++) {
+      text += i === 0 ? `w${i}` : ` w${i}`;
+      wrapParagraphCached({ text: settled, measure, width: 30 });
+      wrapParagraphCached({ text, measure, width: 30 });
+    }
+    expect(wrapCacheSize(measure)).toBe(2);
+    // The settled paragraph is still found, not wrapped again.
+    const seen: string[] = [];
+    const counting = (t: string) => (seen.push(t), t.length);
+    wrapParagraphCached({ text: settled, measure: counting, width: 30 });
+    seen.length = 0;
+    wrapParagraphCached({ text: settled, measure: counting, width: 30 });
+    expect(seen).toEqual([]);
+  });
+
+  it("keeps a paragraph that merely begins like a longer one", () => {
+    const measure = (text: string) => text.length;
+    wrapParagraphCached({ text: "Yes.", measure, width: 30 });
+    wrapParagraphCached({ text: "Yes. And more.", measure, width: 30 });
+    wrapParagraphCached({ text: "Yes.", measure, width: 30 });
+    wrapParagraphCached({ text: "Yes. And more.", measure, width: 30 });
+    expect(wrapCacheSize(measure)).toBe(2);
+  });
+});
+
+describe("lines beside the drop cap", () => {
+  it("leave the cap's width and the page's gap beside it", () => {
+    expect(DROP_GAP).toBe(8);
+    const words = Array.from({ length: 150 }, (_, i) => `w${i % 10}`).join(" ");
+    const lines = wrapParagraph({ text: words, measure, width: 60, drop: { lines: 3, width: 4 } });
+    const beside = lines.filter((line) => line.besideDrop);
+    expect(beside).toHaveLength(3);
+    for (const line of beside) expect(measure(line.text)).toBeLessThanOrEqual(60 - 4 - DROP_GAP);
+    expect(Math.max(...lines.slice(3).map((line) => line.text.length))).toBeGreaterThan(60 - 4 - DROP_GAP);
+    const tight = wrapParagraph({ text: words, measure, width: 60, drop: { lines: 3, width: 4, gap: 0 } });
+    expect(Math.max(...tight.slice(0, 3).map((line) => line.text.length))).toBeGreaterThan(60 - 4 - DROP_GAP);
+  });
+});
+
+describe("marks that fall outside the text", () => {
+  const opts = { measure, width: 20, linesPerPage: 8, dropLines: 2, dropWidth: 3 };
+
+  it("counts a mark in the block as written, so emphasis does not push it past the end", () => {
+    const text = "Alpha **beta** gamma delta epsilon. Zeta eta theta iota kappa.";
+    const offset = "Alpha **beta** gamma delta epsilon.".length;
+    const laid = paginateChapter({ ...chapter(text), footnotes: [{ id: "f", n: 1, blockId: "b", offset, text: "Ran it." }] }, opts);
+    const lines = laid.flatMap((page) => page.lines);
+    const host = lines.find((line) => line.notes.includes(1))!;
+    expect(host.text).toContain("epsilon.");
+  });
+
+  it("hangs a mark past the last paragraph on that paragraph's last line, as a mark of its own", () => {
+    const text = "Alpha beta gamma.\n\nDelta epsilon zeta eta theta iota.";
+    const laid = paginateChapter({ ...chapter(text), footnotes: [{ id: "f", n: 1, blockId: "b", offset: 9999, text: "Ran it." }] }, opts);
+    const lines = laid.flatMap((page) => page.lines).filter((line) => !line.gap);
+    expect(lines.filter((line) => line.notes.includes(1))).toHaveLength(1);
+    expect(lines.at(-1)?.notes).toEqual([1]);
+  });
+
+  it("hangs the mark of a block with no text yet on the next line laid", () => {
+    const shape: Chapter = {
+      ...chapter(""),
+      blocks: [
+        { id: "a", voice: "prose", text: "The test failed on the server." },
+        { id: "e", voice: "prose", text: "" },
+        { id: "q", voice: "ink", text: "Why there?" },
+      ],
+      footnotes: [{ id: "f", n: 1, blockId: "e", offset: 0, text: "Ran it." }],
+    };
+    const lines = paginateChapter(shape, opts).flatMap((page) => page.lines);
+    expect(lines.filter((line) => line.notes.includes(1)).map((line) => line.blockId)).toEqual(["q"]);
+    // With nothing after it, the last line laid takes it.
+    const alone = paginateChapter({ ...shape, blocks: shape.blocks.slice(0, 2) }, opts);
+    expect(alone.flatMap((page) => page.lines).filter((line) => line.notes.includes(1)).map((line) => line.blockId)).toEqual(["a"]);
+    expect(alone.flatMap((page) => page.footnotes).map((f) => f.id)).toEqual(["f"]);
+  });
+});
+
+describe("a pile of footnotes on one line", () => {
+  const footLines = (notes: Footnote[], extra: number) => notes.length * 2 + extra;
+  const opts = { measure, width: 40, linesPerPage: 8, dropLines: 3, dropWidth: 4, footLines };
+
+  it("carries the footnotes that do not fit to the foot of the next page", () => {
+    const text = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+    const footnotes: Footnote[] = Array.from({ length: 6 }, (_, i) => ({ id: `f${i}`, n: i + 1, blockId: "b", offset: 0, text: "Ran it." }));
+    const pages = paginateChapter({ ...chapter(text), footnotes }, opts);
+    for (const page of pages) expect(page.lines.length + footLines(page.footnotes, 0)).toBeLessThanOrEqual(opts.linesPerPage);
+    expect(pages.flatMap((page) => page.footnotes.map((f) => f.n))).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(pages[0].lines).toHaveLength(1);
+    expect(pages[0].lines[0].notes).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(pages[0].footnotes.map((f) => f.n)).toEqual([1, 2, 3]);
+    expect(pages[1].footnotes.map((f) => f.n)).toEqual([4, 5, 6]);
+    expect(pages[1].lines[0].text).toBe(paginateChapter(chapter(text), opts)[0].lines[1].text);
+  });
+});
+
+describe("reasoning in a part still streaming", () => {
+  const opts = { measure, width: 40, linesPerPage: 6, dropLines: 3, dropWidth: 4 };
+  it("shows nothing while the part is inside an open think tag or has only begun one", () => {
+    for (const text of ["<think>Let me look", "</thi", "<"]) {
+      expect(paginateChapter(chapter(text), opts).flatMap((page) => page.lines)).toEqual([]);
+    }
+    const tag = paginateChapter(chapter("<b> is bold"), opts).flatMap((page) => page.lines);
+    expect(tag.map((l) => [l.drop, l.text])).toEqual([["<", "b> is bold"]]);
   });
 });

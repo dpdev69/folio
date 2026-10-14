@@ -45,7 +45,8 @@ export type Plate = {
   deletions: number;
   /** What the change did to the file, as the press reports it. */
   change?: "added" | "deleted" | "modified";
-  status: "open" | "accepted" | "reverted";
+  /** "reverting": Reject is in flight; the plate takes no other answer until it lands. */
+  status: "open" | "accepted" | "reverted" | "reverting";
   folded: boolean;
 };
 
@@ -138,6 +139,15 @@ export type FlowProse = {
 export type FlowBreak = { kind: "break" };
 
 export type Flow = FlowProse | FlowBreak;
+
+/** A plate by its id, and the chapter that holds it. */
+export function findPlate(book: Book, id: string): { chapter: Chapter; plate: Plate } | null {
+  for (const chapter of book.chapters) {
+    const plate = chapter.plates.find((item) => item.id === id);
+    if (plate) return { chapter, plate };
+  }
+  return null;
+}
 
 export function chapterRoman(index: number): string {
   return toRoman(index + 1);
