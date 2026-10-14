@@ -17,7 +17,7 @@ import {
   type ProviderInfo,
   type SessionInfo,
 } from "../engine/client";
-import { reversePatch } from "../engine/revert";
+import { reversePatch } from "../book/diff";
 import type { EventFrame } from "../engine/sse";
 import { pressSummary, type PressPhase } from "../welcome/copy";
 

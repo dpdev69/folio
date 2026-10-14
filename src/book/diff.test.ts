@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePatch } from "./diff";
+import { parsePatch, reversePatch } from "./diff";
 import { editDiff } from "./__fixtures__/load";
 
 const TOOL_PATCH =
@@ -98,5 +98,58 @@ describe("parsePatch", () => {
   it("returns nothing for text that is not a patch", () => {
     expect(parsePatch("")).toEqual([]);
     expect(parsePatch("Binary files a/x.png and b/x.png differ")).toEqual([]);
+  });
+});
+
+describe("reversePatch", () => {
+  const BEFORE = "export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n";
+  const AFTER = `${BEFORE}\nexport function farewell(name: string): string {\n  return \`Goodbye, \${name}!\`;\n}\n`;
+  const TWO_HUNKS = [
+    "--- a/x.txt",
+    "+++ b/x.txt",
+    "@@ -1,3 +1,4 @@",
+    " a",
+    "-b",
+    "+B1",
+    "+B2",
+    " c",
+    "@@ -7,3 +8,2 @@",
+    " g",
+    "-h",
+    " i",
+  ].join("\n");
+  const text = (...items: string[]) => items.join("\n") + "\n";
+  const AFTER_TWO = ["a", "B1", "B2", "c", "d", "e", "f", "g", "i", "j"];
+
+  it("undoes the recorded edit, from the session diff and from the tool's own patch", () => {
+    expect(reversePatch(AFTER, editDiff[0].patch)).toBe(BEFORE);
+    expect(reversePatch(AFTER, TOOL_PATCH)).toBe(BEFORE);
+  });
+
+  it("undoes two hunks, the later one shifted by the first", () => {
+    expect(reversePatch(text(...AFTER_TWO), TWO_HUNKS)).toBe(text("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"));
+  });
+
+  it("finds a hunk up to three lines from where it says, as when a later edit moved it", () => {
+    const below = text("x", "y", "z", ...AFTER_TWO);
+    expect(reversePatch(below, TWO_HUNKS)).toBe(text("x", "y", "z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"));
+    const above = text(...AFTER_TWO.slice(1));
+    expect(reversePatch(above, "@@ -4,3 +4,2 @@\n c\n-cc\n d\n")).toBe(text("B1", "B2", "c", "cc", "d", "e", "f", "g", "i", "j"));
+  });
+
+  it("refuses a hunk more than three lines from where it says", () => {
+    expect(reversePatch(text("1", "2", "3", "4", ...AFTER_TWO), TWO_HUNKS)).toBeNull();
+  });
+
+  it("removes a file's added lines and keeps a missing final newline", () => {
+    expect(reversePatch("one\ntwo\n", "@@ -0,0 +1,2 @@\n+one\n+two\n")).toBe("");
+    const bare = "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n";
+    expect(reversePatch("new\n", bare)).toBe("old");
+  });
+
+  it("refuses when the file no longer matches", () => {
+    expect(reversePatch(BEFORE, editDiff[0].patch)).toBeNull();
+    expect(reversePatch(AFTER.replace("Goodbye", "Bye"), editDiff[0].patch)).toBeNull();
+    expect(reversePatch(AFTER, "not a patch")).toBeNull();
   });
 });
