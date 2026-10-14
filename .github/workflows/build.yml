@@ -47,6 +47,10 @@ jobs:
       - run: npm ci
       - name: Fetch the press
         run: npm run fetch-press
+      - name: Rust tests
+        if: matrix.os == 'macos-latest'
+        # The path guard, the remove guard and the readiness line; the live-press test stays ignored.
+        run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Bundle
         shell: bash
         # Tauri signs and notarizes on macOS only when these secrets exist.
