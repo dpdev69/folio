@@ -385,6 +385,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .diff-line.add { background: var(--add); }
 .fig { font-style: italic; margin: 12px 0; }
 .fig.settled { color: var(--faint); }
+/* A long reply scrolls in the margin, so its actions and the note field below stay in reach. */
+.margin-notes { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .margin-note { border-left: 1px solid var(--terra); padding: 0 0 8px 14px; }
 .ink-line { font-size: 28px; margin: 0 0 6px; }
 .margin-reply { margin: 0 0 8px; font-size: 17.5px; line-height: 1.4; }
