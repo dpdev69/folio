@@ -44,6 +44,26 @@ export function Chrome({ folio }: { folio: Folio }) {
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpen, setMenuOpen]);
+
+  // The search card closes on Escape like the menu, and after a jump to a hit;
+  // the query stays, so the next search can begin from it.
+  const { searchOpen, setSearchOpen, jump } = folio;
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    searchButton.current?.focus();
+  }, [setSearchOpen]);
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSearch();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [searchOpen, closeSearch]);
+  const jumpToHit = (spread: number) => {
+    jump(spread);
+    closeSearch();
+  };
   const chapter = folio.book?.chapters.find((item) => item.id === folio.pages[folio.nav.spread * 2]?.chapterId);
   const index = folio.book?.chapters.findIndex((item) => item.id === chapter?.id) ?? -1;
   const title =
@@ -210,7 +230,7 @@ export function Chrome({ folio }: { folio: Folio }) {
             autoFocus
           />
           {folio.searchHits.map((hit) => (
-            <button key={hit.id} type="button" onClick={() => folio.jump(hit.spread)}>
+            <button key={hit.id} type="button" onClick={() => jumpToHit(hit.spread)}>
               {hit.label}
             </button>
           ))}
