@@ -31,7 +31,6 @@ Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the RE
 
 - The ask toggle's "the press will ask before it writes" hint reads the chapter's own rules; forms are not counted in the page foot (the foot scrolls instead).
 - A page always gets at least 6 prose lines, so on a very short window (under about 410px tall) the page counts room the sheet does not have, and a quill page there cannot fit its quill.
-- A chapter that is not the last and ends on a left page gets no quill, because `paginateBook` labels the blank right page beside it with the next chapter's id (older than the window-sized pages).
 - The CSS mirror test (`scripts/page-css.test.mjs`) does not cover `.line`'s height, and `RUNNING_LINE`, `FOLIO_LINE` and `HINT_LINE` are estimates of the face's normal line height that no CSS states.
 - Reduced motion was verified in the browser on 2026-10-15 with Playwright emulation: turns fade without a curl, plates lay and fold without travel, the menu pops at once, and the curl is unchanged without it.
 - The appearance menu now opens in the pane above the themes and lengthens the card while open; a lighter way to keep every swatch in sight may be wanted.

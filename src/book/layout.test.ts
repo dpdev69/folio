@@ -451,6 +451,27 @@ describe("the quill's room", () => {
     expect(paginateChapter(chapter(left), quill)).toEqual(paginateChapter(chapter(left), opts));
   });
 
+  it("keeps the blank right page after a chapter that ends on a left page in that chapter, so it takes the quill", () => {
+    const left = find((pages) => pages.length === 3 && pages[2].lines.length === 8);
+    const next: Chapter = { ...chapter("The next chapter begins."), id: "d" };
+    const book = paginateBook([chapter(left), next], quill);
+    // Three pages of the first chapter, its blank right page, then the second chapter on a fresh spread.
+    expect(book.pages.slice(0, 4).map((page) => page.chapterId)).toEqual(["c", "c", "c", "c"]);
+    expect(book.pages[3]).toEqual({ chapterId: "c", lines: [], footnotes: [] });
+    expect(book.pages[4].chapterId).toBe("d");
+    expect(book.pages[4].lines.length).toBeGreaterThan(0);
+    expect(book.chapterStart).toEqual({ c: 0, d: 4 });
+    expect(opensChapter(3, "c", book.chapterStart)).toBe(false);
+    expect(opensChapter(4, "d", book.chapterStart)).toBe(true);
+    // The quill's page is the right page of the chapter's last spread (BookView `isQuillPage`).
+    const lastSpread = (id: string) =>
+      book.pages.reduce((last, page, index) => (page.chapterId === id ? Math.floor(index / 2) : last), 0);
+    const quillPage = (id: string) => book.pages[lastSpread(id) * 2 + 1];
+    expect(quillPage("c")).toBe(book.pages[3]);
+    expect(quillPage("c").chapterId).toBe("c");
+    expect(quillPage("d").chapterId).toBe("d");
+  });
+
   it("adds nothing when the last right page has room for the quill", () => {
     const roomy = find((pages) => pages.length === 2 && pages[1].lines.length === 8 - 3);
     expect(paginateChapter(chapter(roomy), quill)).toEqual(paginateChapter(chapter(roomy), opts));

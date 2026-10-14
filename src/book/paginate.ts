@@ -260,7 +260,10 @@ export function paginateBook(
   const pages: LaidPage[] = [];
   const chapterStart: Record<string, number> = {};
   for (const chapter of chapters) {
-    if (pages.length % 2 === 1) pages.push(blank(chapter.id));
+    // A chapter that ends on a left page keeps the blank right page beside it: that
+    // page is its last spread's right page, where the quill goes (BookView `isQuillPage`).
+    // The next chapter opens on the spread after, at `chapterStart`.
+    if (pages.length % 2 === 1) pages.push(blank(pages[pages.length - 1].chapterId));
     chapterStart[chapter.id] = pages.length;
     const laid = paginateChapter(chapter, {
       ...opts,
