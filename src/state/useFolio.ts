@@ -3,6 +3,7 @@ import { applyEvent, appendPrompt, renameBlock } from "../book/events";
 import { paginateBook, type LaidPage } from "../book/paginate";
 import { chapterRoman, displayTitle, isUntitled, type Book, type Chapter, type Plate } from "../book/model";
 import { SAMPLE_BREAKS, SAMPLE_DRAFT, sampleBook, sampleNoteReply, sampleReply } from "../book/sample";
+import { composeNote } from "../book/notes";
 import { revealNextLine, type Measure } from "../book/wrap";
 import type { EngineClient, FormAnswer, ModelInfo, ModelRef, ProviderInfo } from "../engine/client";
 import { coalesce } from "../engine/coalesce";
@@ -455,7 +456,7 @@ export function useFolio() {
     const chapter = chapterForSpread(nav.spread);
     if (!book || !chapter || !quote.trim() || !prompt.trim()) return;
     const noteId = `note-${Date.now()}`;
-    const composed = `About this passage:\n\n> ${quote.trim()}\n\n${prompt.trim()}`;
+    const composed = composeNote(quote, prompt);
     updateChapter(chapter.id, (current) => ({
       ...current,
       notes: [...current.notes, { id: noteId, quote: quote.trim(), prompt: prompt.trim(), pending: true }],

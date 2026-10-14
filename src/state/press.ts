@@ -248,28 +248,20 @@ export async function turnDiff(client: EngineClient, chapter: Chapter): Promise<
   return { type: "folio.diff", data: { sessionID: chapter.id, diff, turnMessageId: turn } };
 }
 
-/** Said when a plate's own turn cannot be told apart from the rest of the session. */
+/** Said when a plate has no patch of its own to reverse. */
 export const CANNOT_REVERT = "This plate cannot be set back on its own.";
 
 /**
- * Undo one plate's file: reverse its turn's patch for that file against the
- * file as it is now, write it back through Folio, and tell the model. Session
- * revert is not used; it would delete the chapter's history.
+ * Undo one plate's file: reverse the plate's own patch against the file as it
+ * is now, write it back through Folio, and tell the model. A later change to
+ * the same file is left alone. Session revert is not used; it would delete the
+ * chapter's history.
  */
 export async function revertPlate(client: EngineClient, book: Book, chapter: Chapter, plate: Plate): Promise<EventFrame> {
-  // The whole session's diff would also undo earlier turns, accepted ones too, so never fall back to it.
-  if (!plate.turnMessageId) throw new Error(CANNOT_REVERT);
-  let diffs;
-  try {
-    diffs = await client.diff(chapter.id, plate.turnMessageId);
-  } catch (error) {
-    if (error instanceof EngineError && error.status === 400) throw new Error(CANNOT_REVERT);
-    throw error;
-  }
-  const entry = diffs.find((d) => d.file === plate.file && d.patch);
-  if (!entry?.patch) throw new Error(`The press has no change in ${plate.file} to undo.`);
+  // Without its own patch a plate cannot be told apart from later changes to the file.
+  if (!plate.patch) throw new Error(CANNOT_REVERT);
   const current = await client.readFile(book.directory, plate.file);
-  const before = reversePatch(current, entry.patch);
+  const before = reversePatch(current, plate.patch);
   if (before === null) throw new Error(`${plate.file} has changed since this plate was set, so it was left as it is.`);
   await client.writeFile(book.directory, plate.file, before);
   await client.synthetic(chapter.id, `The reader reverted the change to ${plate.file}.`).catch(() => {});

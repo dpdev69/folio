@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyEvent, type Frame } from "./events";
 import type { Book, Chapter } from "./model";
+import { composeNote, parseNote } from "./notes";
 import { chapterFromMessages } from "./transcript";
 import { pushSse, unwrapEvent } from "../engine/sse";
 import { captures, editMessages, FIXTURE_DIRECTORY } from "./__fixtures__/load";
@@ -56,6 +57,55 @@ describe("chapterFromMessages", () => {
     expect(chapterFromMessages({ ...empty("ses_1"), busy: true }, failed).error).toBeUndefined();
     const stopped = [{ ...failed[1], error: { type: "aborted", message: "Step interrupted" } }];
     expect(chapterFromMessages(empty("ses_1"), stopped).error).toBeUndefined();
+  });
+
+  describe("margin notes", () => {
+    const note = (id: string, quote: string, prompt: string) =>
+      ({ id, type: "user", text: `About this passage:\n\n> ${quote}\n\n${prompt}` }) as const;
+    const said = (id: string, text: string) => ({ id, type: "assistant", content: [{ type: "text", text }] });
+    const history = [
+      { id: "msg_u1", type: "user", text: "Fix the flaky test." },
+      said("msg_a1", "The clock was frozen before the token was minted."),
+      note("msg_u2", "the clock was frozen", "Why freeze it?"),
+      said("msg_a2", "So the token's time is fixed."),
+      { id: "msg_u3", type: "user", text: "Thank you." },
+      said("msg_a3", "You are welcome."),
+    ];
+
+    it("reads back the quote and the question of the prompt the hook composes", () => {
+      expect(parseNote(composeNote(" the clock was frozen ", "Why freeze it?\nAnd why there?"))).toEqual({
+        quote: "the clock was frozen",
+        prompt: "Why freeze it?\nAnd why there?",
+      });
+      expect(parseNote("Fix the flaky test.")).toBeUndefined();
+    });
+
+    it("sets a note's prompt and its reply in the margin and makes the note again", () => {
+      const read = chapterFromMessages(empty("ses_1"), history);
+      expect(read.blocks.filter((b) => !b.marginal).map((b) => b.text)).toEqual([
+        "Fix the flaky test.",
+        "The clock was frozen before the token was minted.",
+        "Thank you.",
+        "You are welcome.",
+      ]);
+      expect(read.blocks.filter((b) => b.marginal).map((b) => b.id)).toEqual(["msg_u2", "msg_a2:t0"]);
+      expect(read.notes).toEqual([
+        { id: "note-msg_u2", quote: "the clock was frozen", prompt: "Why freeze it?", reply: "So the token's time is fixed.", pending: false },
+      ]);
+    });
+
+    it("gives the reply to a note the chapter already holds for the same passage", () => {
+      const held = { id: "note_1", quote: "the clock was frozen", prompt: "Why freeze it?", kept: true };
+      const read = chapterFromMessages({ ...empty("ses_1"), notes: [held] }, history);
+      expect(read.notes).toEqual([{ ...held, reply: "So the token's time is fixed.", pending: false }]);
+    });
+
+    it("lets a note that was never answered go, so the next reply stays in the main flow", () => {
+      const unanswered = [history[0], history[1], history[2], history[4], history[5]];
+      const read = chapterFromMessages(empty("ses_1"), unanswered);
+      expect(read.notes).toEqual([{ id: "note-msg_u2", quote: "the clock was frozen", prompt: "Why freeze it?", pending: false }]);
+      expect(read.blocks.find((b) => b.id === "msg_a3:t0")?.marginal).toBe(false);
+    });
   });
 
   it("words a failed tool and a running one from their state", () => {

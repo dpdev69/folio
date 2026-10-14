@@ -1,5 +1,15 @@
-import { isUntitled, type Book, type Chapter, type Footnote, type Form, type FormField, type ProseBlock } from "./model";
+import {
+  isUntitled,
+  type Book,
+  type Chapter,
+  type Footnote,
+  type Form,
+  type FormField,
+  type PermissionAsk,
+  type ProseBlock,
+} from "./model";
 import { applyDiff, dropPlate, filesOf, toolPlate } from "./plates";
+import { NOTE_PREFIX } from "./notes";
 import { footnoteSentence, isEdit, type ToolLike } from "./tools";
 
 /**
@@ -84,7 +94,7 @@ function reduceChapter(chapter: Chapter, type: string, data: Data): Chapter {
     case "form.cancelled":
       return chapter.forms.some((f) => f.id === id) ? { ...chapter, forms: chapter.forms.filter((f) => f.id !== id) } : chapter;
     case "folio.diff":
-      return rewordPlates(applyDiff(chapter, data.diff, lastInkId(chapter)));
+      return rewordPlates(applyDiff(chapter, data.diff, stringOf(data.turnMessageId) ?? lastInkId(chapter)));
     default:
       return chapter;
   }
@@ -107,10 +117,14 @@ export function textBlockId(assistantMessageID: string, ordinal: number): string
   return `${assistantMessageID}:t${ordinal}`;
 }
 
+/** The turn failed because its model is gone; the hook offers the model list. */
+export const MODEL_GONE = "That model is no longer offered. Choose another from the menu.";
+
 /** The press stopped with this error; say so in a sentence. */
 export function errorSentence(raw: unknown): string {
   const error = recordOf(raw);
   const message = stringOf(error?.message)?.trim();
+  if (error?.status === 410 || error?.statusCode === 410 || /deprecated/i.test(message ?? "")) return MODEL_GONE;
   if (message) return message;
   if (stringOf(error?.type) === "aborted") return "The press was stopped before it finished.";
   return "The press stopped.";
@@ -173,7 +187,9 @@ function enqueue(chapter: Chapter, inboxID: string | undefined, item: Data | und
   if (!text.trim() || chapter.blocks.some((b) => b.id === inboxID)) return chapter;
   const local = chapter.blocks.find((b) => b.voice === "ink" && b.id.startsWith("local-") && b.text.trim() === text.trim());
   if (local) return renameBlock(chapter, local.id, inboxID);
-  return { ...chapter, blocks: [...chapter.blocks, { id: inboxID, voice: "ink", text }] };
+  // A waiting margin note's own question belongs in the margin, with its reply.
+  const marginal = text.startsWith(NOTE_PREFIX) && chapter.notes.some((n) => n.pending);
+  return { ...chapter, blocks: [...chapter.blocks, { id: inboxID, voice: "ink", text, ...(marginal ? { marginal } : {}) }] };
 }
 
 /**
@@ -203,10 +219,10 @@ export function stepStarted(chapter: Chapter, assistantMessageID: string): Chapt
   return { ...chapter, turns, notice: undefined };
 }
 
-/** Add a user prompt from history in ink. */
-export function addInk(chapter: Chapter, id: string, text: string): Chapter {
+/** Add a user prompt from history in ink; a margin note's question stays out of the main flow. */
+export function addInk(chapter: Chapter, id: string, text: string, marginal = false): Chapter {
   if (!text.trim() || chapter.blocks.some((b) => b.id === id)) return chapter;
-  return { ...chapter, blocks: [...chapter.blocks, { id, voice: "ink", text }] };
+  return { ...chapter, blocks: [...chapter.blocks, { id, voice: "ink", text, ...(marginal ? { marginal } : {}) }] };
 }
 
 /**
@@ -343,11 +359,18 @@ function addAsk(chapter: Chapter, data: Data): Chapter {
   const patterns = Array.isArray(data.resources) ? data.resources.filter((r): r is string => typeof r === "string") : [];
   const files = filesOf(data.metadata);
   const target = patterns.filter((p) => p !== "*").join(", ") || files[0]?.file || "this";
-  const ask = { id, permission, patterns, title: `May I ${verb(permission)} ${target}?`, patch: files[0]?.patch };
+  const source = recordOf(data.source);
+  const callId = stringOf(source?.type) === "tool" ? stringOf(source?.id) : undefined;
+  const ask: PermissionAsk = { id, permission, patterns, title: `May I ${verb(permission)} ${target}?`, patch: files[0]?.patch };
+  if (callId) ask.callId = callId;
   const asks = chapter.asks.some((a) => a.id === id)
     ? chapter.asks.map((a) => (a.id === id ? ask : a))
     : [...chapter.asks, ask];
-  return { ...chapter, asks };
+  const next = { ...chapter, asks };
+  // The edit waiting on this ask shows the change the press proposes, not its own strings.
+  const call = callId ? chapter.calls?.[callId] : undefined;
+  if (!callId || !call || !isEdit(call.name) || !files.some((f) => f.patch)) return next;
+  return placeTool(next, callId, { status: "running" }, files);
 }
 
 function verb(action: string): string {

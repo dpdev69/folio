@@ -30,21 +30,39 @@ function plate(over: Partial<Plate> = {}): Plate {
 const book = (chapters: Chapter[]): Book => ({ id: DIRECTORY, title: "repo", directory: DIRECTORY, sample: false, chapters });
 
 describe("revertPlate", () => {
-  it("refuses, without touching the file, when the press will not scope the diff to the plate's turn", async () => {
-    const { replay, client } = await press();
+  const GREET = "export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n";
+  /** The replay press serves GREET as the file now; this patch renamed hello to greet. */
+  const RENAME = "@@ -1,3 +1,3 @@\n-export function hello(name: string): string {\n+export function greet(name: string): string {\n   return `Hello, ${name}!`;\n }\n";
+
+  async function hosted() {
+    replay = await startReplay({ password: "pw" });
+    const written: { path: string; content: string }[] = [];
+    const host = { writeFile: async (_dir: string, path: string, content: string) => void written.push({ path, content }) };
+    return { replay, written, client: new EngineClient(replay.url, { password: "pw", host }) };
+  }
+
+  it("reverses the plate's own patch against the file as it is now, and tells the model", async () => {
+    const { replay, written, client } = await hosted();
     const ch = chapter();
-    // An assistant id: the press answers 400, "not a user message".
-    const p = plate({ turnMessageId: "msg_137831fee001iiy0rpghC3oXA3" });
-    await expect(revertPlate(client, book([ch]), ch, p)).rejects.toThrow(CANNOT_REVERT);
-    const diffs = replay.requests.filter((r) => r.path.endsWith("/diff"));
-    expect(diffs.map((r) => r.query.from)).toEqual(["msg_137831fee001iiy0rpghC3oXA3"]);
-    expect(replay.requests.some((r) => r.path.startsWith("/api/fs/") || r.path.endsWith("/synthetic"))).toBe(false);
+    await revertPlate(client, book([ch]), ch, plate({ patch: RENAME, turnMessageId: "msg_1378318cd0011en9zAGWcvx4bC" }));
+    expect(written).toEqual([{ path: "src/greet.ts", content: GREET.replace("greet(", "hello(") }]);
+    expect(replay.requests.some((r) => r.path.endsWith("/synthetic"))).toBe(true);
   });
 
-  it("refuses a plate that does not know its turn", async () => {
+  it("leaves a file that has moved on as it is", async () => {
+    const { written, client } = await hosted();
+    const ch = chapter();
+    const moved = RENAME.replace("+export function greet", "+export function wave");
+    await expect(revertPlate(client, book([ch]), ch, plate({ patch: moved }))).rejects.toThrow("has changed since");
+    expect(written).toEqual([]);
+  });
+
+  it("refuses a plate without a patch of its own, without touching anything", async () => {
     const { replay, client } = await press();
     const ch = chapter();
-    await expect(revertPlate(client, book([ch]), ch, plate())).rejects.toThrow(CANNOT_REVERT);
+    await expect(revertPlate(client, book([ch]), ch, plate({ turnMessageId: "msg_1378318cd0011en9zAGWcvx4bC" }))).rejects.toThrow(
+      CANNOT_REVERT,
+    );
     expect(replay.requests.length).toBe(0);
   });
 });

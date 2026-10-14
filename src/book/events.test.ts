@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEvent, appendPrompt, renameBlock, type Frame } from "./events";
+import { applyEvent, appendPrompt, MODEL_GONE, renameBlock, type Frame } from "./events";
 import { parsePatch } from "./diff";
 import { quillKey } from "./quill";
 import type { Book, Chapter } from "./model";
@@ -601,6 +601,73 @@ describe("footnote anchors", () => {
     next = applyEvent(next, delta(1, " Twice."));
     next = play(next, tool("completed"));
     expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "msg_a:t1", offset: 0 });
+  });
+});
+
+describe("plates keep their patch", () => {
+  it("takes the patch from the tool, then from the session diff", () => {
+    const pressed = play(shelf(), frames(captures.edit));
+    const plate = only(pressed).plates[0];
+    expect(plate.patch).toMatch(/^Index: src\/greet\.ts\n/);
+    const diffed = only(applyEvent(pressed, { type: "folio.diff", data: { sessionID: pressed.chapters[0].id, diff: editDiff } }));
+    expect(diffed.plates[0].patch).toBe(editDiff[0].patch);
+  });
+
+  it("sets the session diff on the turn the frame names, not the latest one", () => {
+    let next = play(shelf(), frames(captures.edit));
+    const sessionID = next.chapters[0].id;
+    const firstTurn = next.chapters[0].plates[0].turnMessageId;
+    next = applyEvent(next, {
+      type: "session.inbox.enqueued",
+      data: { sessionID, inboxID: "msg_u2", item: { type: "user", payload: { text: "Now explain it." } } },
+    });
+    const chapter = only(applyEvent(next, { type: "folio.diff", data: { sessionID, diff: editDiff, turnMessageId: firstTurn } }));
+    expect(chapter.plates).toHaveLength(1);
+    expect(chapter.plates[0]).toMatchObject({ turnMessageId: firstTurn, patch: editDiff[0].patch });
+  });
+});
+
+describe("an ask about an edit", () => {
+  it("names the tool call it holds up and sets that call's plate from the proposed patch", () => {
+    const list = frames(captures.ask);
+    const asked = list.find((f) => f.type === "permission.asked")!;
+    const source = data(asked).source as { id: string };
+    const waiting = only(play(shelf(), list, (f) => f.type === "permission.asked"));
+    expect(waiting.asks[0].callId).toBe(source.id);
+    const plate = waiting.plates.find((p) => p.id === `plate-${source.id}`)!;
+    expect(plate.patch).toBe(waiting.asks[0].patch);
+    expect(plate.lines).toEqual(parsePatch(waiting.asks[0].patch!));
+    expect(plate.additions).toBe(4);
+  });
+});
+
+describe("margin notes from the press", () => {
+  const COMPOSED = "About this passage:\n\n> the clock was frozen\n\nWhy freeze it?";
+  const noted = (): Book => ({
+    ...book(),
+    chapters: [{ ...book().chapters[0], notes: [{ id: "note_1", quote: "the clock was frozen", prompt: "Why freeze it?", pending: true }] }],
+  });
+  const enqueued = (text: string) => ev("session.inbox.enqueued", { inboxID: "msg_n", item: { type: "user", payload: { text } } });
+
+  it("keeps the composed prompt of a waiting note out of the main flow", () => {
+    const chapter = only(applyEvent(noted(), enqueued(COMPOSED)));
+    expect(chapter.blocks).toEqual([{ id: "msg_n", voice: "ink", text: COMPOSED, marginal: true }]);
+  });
+
+  it("sets the same words in ink when no note waits for them", () => {
+    const chapter = only(applyEvent(book(), enqueued(COMPOSED)));
+    expect(chapter.blocks[0].marginal).toBeUndefined();
+  });
+});
+
+describe("a model the press no longer offers", () => {
+  it("says so in a sentence that points to the menu", () => {
+    const gone = (error: Record<string, unknown>) => only(applyEvent(book(), ev("session.execution.failed", { error }))).error;
+    expect(gone({ type: "api", message: "Model exo-free has been deprecated.", status: 410 })).toBe(MODEL_GONE);
+    expect(gone({ type: "api", message: "Gone.", status: 410 })).toBe(MODEL_GONE);
+    expect(gone({ type: "api", message: "This model is deprecated" })).toBe(MODEL_GONE);
+    expect(gone({ type: "api", message: "Rate limited.", status: 429 })).toBe("Rate limited.");
+    expect(MODEL_GONE).toBe("That model is no longer offered. Choose another from the menu.");
   });
 });
 

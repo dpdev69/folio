@@ -39,6 +39,8 @@ export type Plate = {
   title: string;
   caption: string;
   lines: PlateLine[];
+  /** The whole unified patch the lines come from, so Reject can undo exactly this change. */
+  patch?: string;
   additions: number;
   deletions: number;
   status: "open" | "accepted" | "reverted";
@@ -62,6 +64,8 @@ export type PermissionAsk = {
   title: string;
   /** The proposed change, as a unified patch, when the press sent one. */
   patch?: string;
+  /** The tool call the press holds until the reader answers; its plate is `plate-<callId>`. */
+  callId?: string;
 };
 
 export type FormOption = { value: string; label: string; description?: string };
