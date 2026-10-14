@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePatch, reversePatch, shownLineNumber } from "./diff";
+import { parsePatch, patchSides, reversePatch, shownLineNumber } from "./diff";
 import { editDiff } from "./__fixtures__/load";
 
 const TOOL_PATCH =
@@ -165,5 +165,24 @@ describe("reversePatch", () => {
     expect(reversePatch(BEFORE, editDiff[0].patch)).toBeNull();
     expect(reversePatch(AFTER.replace("Goodbye", "Bye"), editDiff[0].patch)).toBeNull();
     expect(reversePatch(AFTER, "not a patch")).toBeNull();
+  });
+});
+
+describe("patchSides", () => {
+  it("tells a new file and a removed file from a change", () => {
+    const added = "diff --git a/src/new.ts b/src/new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1,2 @@\n+a\n+b\n";
+    const removed = "diff --git a/src/old.ts b/src/old.ts\ndeleted file mode 100644\n--- a/src/old.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a\n-b\n";
+    const changed = "@@ -1,1 +1,1 @@\n-a\n+b\n";
+    expect(patchSides(added)).toEqual({ oldEmpty: true, newEmpty: false });
+    expect(patchSides(removed)).toEqual({ oldEmpty: false, newEmpty: true });
+    expect(patchSides(changed)).toEqual({ oldEmpty: false, newEmpty: false });
+    // A tool patch names no /dev/null; its hunk header alone says so.
+    expect(patchSides("Index: x\n===\n--- x\n+++ x\n@@ -0,0 +1,1 @@\n+a\n")).toEqual({ oldEmpty: true, newEmpty: false });
+  });
+
+  it("reverses a removed file into its old words from nothing", () => {
+    const removed = "--- a/src/old.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-a\n-b\n";
+    expect(reversePatch("", removed)).toBe("a\nb\n");
+    expect(reversePatch("", "@@ -1,2 +0,0 @@\n-a\n-b\n\\ No newline at end of file\n")).toBe("a\nb");
   });
 });

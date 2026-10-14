@@ -17,7 +17,7 @@ import {
   type ProviderInfo,
   type SessionInfo,
 } from "../engine/client";
-import { reversePatch } from "../book/diff";
+import { patchSides, reversePatch } from "../book/diff";
 import type { EventFrame } from "../engine/sse";
 import { pressSummary, type PressPhase } from "../welcome/copy";
 
@@ -54,6 +54,7 @@ export type PressHost = FileHost & {
   install(): Promise<{ ok: boolean; error?: string }>;
   writeFile(directory: string, path: string, content: string): Promise<void>;
   readFile(directory: string, path: string): Promise<string>;
+  removeFile(directory: string, path: string): Promise<void>;
 };
 
 export function pressHost(): PressHost {
@@ -84,6 +85,10 @@ const tauriHost: PressHost = {
     if (!result.ok) throw new Error(result.error ?? `${path} was not written.`);
   },
   readFile: (directory, path) => invoke<string>("read_file", { directory, path }),
+  async removeFile(directory, path) {
+    const result = await invoke<{ ok: boolean; error?: string }>("remove_file", { directory, path });
+    if (!result.ok) throw new Error(result.error ?? `${path} was not removed.`);
+  },
 };
 
 async function json<T>(input: string, init?: RequestInit): Promise<T> {
@@ -117,6 +122,14 @@ const devHost: PressHost = {
     const result = await json<{ ok: boolean; content?: string; error?: string }>(`/folio/read?${query}`);
     if (!result.ok || result.content === undefined) throw new Error(result.error ?? `${path} was not read.`);
     return result.content;
+  },
+  async removeFile(directory, path) {
+    const result = await json<{ ok: boolean; error?: string }>("/folio/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ directory, path }),
+    });
+    if (!result.ok) throw new Error(result.error ?? `${path} was not removed.`);
   },
 };
 
@@ -316,18 +329,42 @@ export const CANNOT_REVERT = "This plate cannot be set back on its own.";
 /**
  * Undo one plate's file: reverse the plate's own patch against the file as it
  * is now, write it back through Folio, and tell the model. A later change to
- * the same file is left alone. Session revert is not used; it would delete the
- * chapter's history.
+ * the same file is left alone. A file the plate created is removed, not left
+ * empty; a file it removed is written back from the patch. Session revert is
+ * not used; it would delete the chapter's history.
  */
 export async function revertPlate(client: EngineClient, book: Book, chapter: Chapter, plate: Plate): Promise<EventFrame> {
   // Without its own patch a plate cannot be told apart from later changes to the file.
   if (!plate.patch) throw new Error(CANNOT_REVERT);
-  const current = await client.readFile(book.directory, plate.file);
+  const created = createsFile(plate);
+  const removed = plate.change === "deleted" || patchSides(plate.patch).newEmpty;
+  const moved = new Error(`${plate.file} has changed since this plate was set, so it was left as it is.`);
+  let current: string;
+  try {
+    current = await client.readFile(book.directory, plate.file);
+  } catch (error) {
+    // A file the plate removed is not there to read; the patch holds all of it.
+    if (!removed) throw error;
+    current = "";
+  }
+  // Something written where a removed file was is not the plate's to replace.
+  if (removed && current !== "") throw moved;
   const before = reversePatch(current, plate.patch);
-  if (before === null) throw new Error(`${plate.file} has changed since this plate was set, so it was left as it is.`);
-  await client.writeFile(book.directory, plate.file, before);
+  if (before === null) throw moved;
+  if (created) {
+    // More than the plate wrote is in the file now; removing it would lose that.
+    if (before !== "") throw moved;
+    await client.removeFile(book.directory, plate.file);
+  } else {
+    await client.writeFile(book.directory, plate.file, before);
+  }
   await client.synthetic(chapter.id, revertNote(plate.file)).catch(() => {});
   return turnDiff(client, chapter);
+}
+
+/** The plate made its file; Reject takes the file away rather than emptying it. */
+export function createsFile(plate: Plate): boolean {
+  return plate.change === "added" || Boolean(plate.patch && patchSides(plate.patch).oldEmpty);
 }
 
 export function bookFromSessions(directory: string, sessions: SessionInfo[]): Book {

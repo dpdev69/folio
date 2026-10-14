@@ -54,6 +54,11 @@ fn write_file(directory: String, path: String, content: String) -> press::Outcom
 }
 
 #[tauri::command]
+fn remove_file(directory: String, path: String) -> press::Outcome {
+    press::remove_file(&directory, &path)
+}
+
+#[tauri::command]
 fn read_file(directory: String, path: String) -> Result<String, String> {
     press::read_file(&directory, &path)
 }
@@ -71,6 +76,7 @@ pub fn run() {
             engine_status,
             engine_stop,
             write_file,
+            remove_file,
             read_file
         ])
         .build(tauri::generate_context!())

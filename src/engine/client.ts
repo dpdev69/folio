@@ -41,6 +41,8 @@ export type PendingForm = { id: string; sessionID?: string; [key: string]: unkno
 export type FileHost = {
   writeFile?: (directory: string, path: string, content: string) => Promise<void>;
   readFile?: (directory: string, path: string) => Promise<string>;
+  /** Remove a file in the book; the press has no route for it. */
+  removeFile?: (directory: string, path: string) => Promise<void>;
 };
 
 export type EngineOptions = {
@@ -281,6 +283,12 @@ export class EngineClient {
       if (!this.opts.host?.writeFile || !fallsBack(error)) throw error;
       await this.opts.host.writeFile(directory, path, content);
     }
+  }
+
+  /** Remove a file in the book, through the host: the press has no route for it. */
+  async removeFile(directory: string, path: string): Promise<void> {
+    if (!this.opts.host?.removeFile) throw new EngineError(0, "NoHost", `Folio cannot remove ${path} here.`);
+    await this.opts.host.removeFile(directory, path);
   }
 
   /**

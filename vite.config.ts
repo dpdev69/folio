@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { installPress, probePress, readBookFile, servePress, stopPress, writeBookFile } from "./press/host";
+import { installPress, probePress, readBookFile, removeBookFile, servePress, stopPress, writeBookFile } from "./press/host";
 
 // The page calls the opencode server directly with Basic auth (CORS allows
 // http://127.0.0.1:*). /folio/* is the local press helper: detect, install and
@@ -47,6 +47,13 @@ function pressPlugin(): Plugin {
               return reply(res, 400, { ok: false, error: "A write needs a directory, a path and content." });
             }
             return reply(res, 200, await writeBookFile(body.directory, body.path, body.content));
+          }
+          if (route === "POST /folio/remove") {
+            const body = (await readJson(req)) as { directory?: unknown; path?: unknown };
+            if (typeof body.directory !== "string" || typeof body.path !== "string") {
+              return reply(res, 400, { ok: false, error: "A removal needs a directory and a path." });
+            }
+            return reply(res, 200, await removeBookFile(body.directory, body.path));
           }
           if (route === "GET /folio/read") {
             const directory = url.searchParams.get("directory") ?? "";

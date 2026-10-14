@@ -104,6 +104,60 @@ describe("revertPlate", () => {
   });
 });
 
+describe("revertPlate on a new or a removed file", () => {
+  const NEW = "diff --git a/src/new.ts b/src/new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1,2 @@\n+export const a = 1;\n+export const b = 2;\n";
+  const GONE = "diff --git a/src/gone.ts b/src/gone.ts\ndeleted file mode 100644\n--- a/src/gone.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const a = 1;\n-export const b = 2;\n";
+
+  async function hosted(files: Record<string, string>) {
+    replay = await startReplay({ password: "pw", files });
+    const calls: string[] = [];
+    const host = {
+      writeFile: async (_dir: string, path: string, content: string) => void calls.push(`write ${path} ${JSON.stringify(content)}`),
+      readFile: async (_dir: string, path: string): Promise<string> => {
+        calls.push(`read ${path}`);
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+      },
+      removeFile: async (_dir: string, path: string) => void calls.push(`remove ${path}`),
+    };
+    return { calls, client: new EngineClient(replay.url, { password: "pw", host }) };
+  }
+
+  it("removes a file the plate created, rather than leaving it empty", async () => {
+    const { calls, client } = await hosted({ "src/new.ts": "export const a = 1;\nexport const b = 2;\n" });
+    const ch = chapter();
+    await revertPlate(client, book([ch]), ch, plate({ file: "src/new.ts", patch: NEW, change: "added" }));
+    expect(calls).toEqual(["remove src/new.ts"]);
+  });
+
+  it("removes a new file when only the patch says it is new", async () => {
+    const { calls, client } = await hosted({ "src/new.ts": "export const a = 1;\nexport const b = 2;\n" });
+    const ch = chapter();
+    await revertPlate(client, book([ch]), ch, plate({ file: "src/new.ts", patch: NEW }));
+    expect(calls).toEqual(["remove src/new.ts"]);
+  });
+
+  it("leaves a new file alone once more was written to it", async () => {
+    const { calls, client } = await hosted({ "src/new.ts": "export const a = 1;\nexport const b = 2;\nexport const c = 3;\n" });
+    const ch = chapter();
+    await expect(revertPlate(client, book([ch]), ch, plate({ file: "src/new.ts", patch: NEW, change: "added" }))).rejects.toThrow("has changed since");
+    expect(calls).toEqual([]);
+  });
+
+  it("writes a removed file back from the patch when it is missing", async () => {
+    const { calls, client } = await hosted({});
+    const ch = chapter();
+    await revertPlate(client, book([ch]), ch, plate({ file: "src/gone.ts", patch: GONE, change: "deleted" }));
+    expect(calls).toEqual(["read src/gone.ts", `write src/gone.ts ${JSON.stringify("export const a = 1;\nexport const b = 2;\n")}`]);
+  });
+
+  it("leaves a removed file alone if something has been written in its place", async () => {
+    const { calls, client } = await hosted({ "src/gone.ts": "something new\n" });
+    const ch = chapter();
+    await expect(revertPlate(client, book([ch]), ch, plate({ file: "src/gone.ts", patch: GONE, change: "deleted" }))).rejects.toThrow("has changed since");
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("pending asks and forms", () => {
   it("are set on open, through the same reducer paths as the events", async () => {
     replay = await startReplay({ password: "pw", pending: true });

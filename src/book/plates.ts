@@ -54,6 +54,7 @@ export function toolPlate(
     patch: entry?.patch ?? existing?.patch,
     additions,
     deletions,
+    ...changeOf(entry?.status ?? existing?.change),
     status: existing?.status ?? "open",
     folded: existing?.folded ?? false,
   };
@@ -109,6 +110,7 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
       patch: existing?.patch ?? (lines.length && !unscoped ? diff.patch : undefined),
       additions: diff.additions ?? existing?.additions ?? count(lines, "add"),
       deletions: diff.deletions ?? existing?.deletions ?? count(lines, "del"),
+      ...changeOf(diff.status ?? existing?.change),
       status: existing?.status ?? "open",
       folded: existing?.folded ?? false,
     };
@@ -120,6 +122,10 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
 /** The id of a plate set from the session diff: the same for a file's turn on every read. */
 export function diffPlateId(file: string, turnMessageId: string | undefined): string {
   return turnMessageId ? `diff-${file}@${turnMessageId}` : `diff-${file}`;
+}
+
+function changeOf(status: string | undefined): Pick<Plate, "change"> {
+  return status === "added" || status === "deleted" || status === "modified" ? { change: status } : {};
 }
 
 function captionFor(status: string | undefined, file: string): string {

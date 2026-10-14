@@ -32,6 +32,7 @@ import {
   loadChosenModel,
   saveChosenModel,
   revertPlate,
+  createsFile,
   turnDiff,
   type AttachTarget,
 } from "./press";
@@ -609,7 +610,7 @@ export function useFolio() {
         const frame = await revertPlate(client, book, found.chapter, found.plate);
         mutatePlate(id, (plate) => ({ ...plate, status: "reverted", folded: true }));
         setBook((current) => (current ? applyEvent(current, frame) : current));
-        setNotice("The file was restored.");
+        setNotice(createsFile(found.plate) ? "The new file was taken away." : "The file was restored.");
       } catch (error) {
         setNotice(messageOf(error, "The press could not undo the change."));
       }

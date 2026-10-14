@@ -176,6 +176,25 @@ pub fn write_file(directory: &str, path: &str, content: &str) -> Outcome {
     }
 }
 
+/// Remove a file in the book (never a folder), through the same guard as a write.
+/// A link inside the book is removed itself; one that leaves the book is refused.
+pub fn remove_file(directory: &str, path: &str) -> Outcome {
+    let result = resolve_inside(directory, path).and_then(|target| {
+        let meta = target.symlink_metadata().map_err(|e| e.to_string())?;
+        if meta.is_dir() {
+            return Err(format!("{path} is a folder, not a file."));
+        }
+        std::fs::remove_file(&target).map_err(|e| e.to_string())
+    });
+    match result {
+        Ok(()) => Outcome { ok: true, error: None },
+        Err(error) => Outcome {
+            ok: false,
+            error: Some(error),
+        },
+    }
+}
+
 pub fn read_file(directory: &str, path: &str) -> Result<String, String> {
     let target = resolve_inside(directory, path)?;
     std::fs::read_to_string(target).map_err(|e| e.to_string())
@@ -432,6 +451,37 @@ mod tests {
         assert_eq!(read_file(dir, "src/greet.ts").unwrap(), "hello\n");
         assert!(!write_file(dir, "../escape.txt", "x").ok);
         std::fs::remove_dir_all(&book).unwrap();
+    }
+
+    /// Removing goes through the same guard as writing, and never takes a folder.
+    #[test]
+    fn removes_only_files_inside_the_book() {
+        let base = std::env::temp_dir().join(format!("folio-press-remove-{}", std::process::id()));
+        let book = base.join("book");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(book.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), "keep\n").unwrap();
+        let dir = book.to_str().unwrap();
+        assert!(write_file(dir, "src/new.ts", "x\n").ok);
+        assert!(remove_file(dir, "src/new.ts").ok);
+        assert!(!book.join("src/new.ts").exists());
+        assert!(!remove_file(dir, "src").ok);
+        assert!(book.join("src").is_dir());
+        assert!(!remove_file(dir, "../outside/keep.txt").ok);
+        assert!(!remove_file(dir, outside.join("keep.txt").to_str().unwrap()).ok);
+        assert!(!remove_file(dir, "").ok);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, book.join("away")).unwrap();
+            assert!(!remove_file(dir, "away/keep.txt").ok);
+            std::os::unix::fs::symlink("../outside/keep.txt", book.join("link.txt")).unwrap();
+            assert!(!remove_file(dir, "link.txt").ok);
+            std::os::unix::fs::symlink("../outside/missing.txt", book.join("dangling.txt")).unwrap();
+            assert!(!remove_file(dir, "dangling.txt").ok);
+        }
+        assert!(outside.join("keep.txt").exists());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     /// A link to a file that does not exist yet must not let a write create it outside the book.

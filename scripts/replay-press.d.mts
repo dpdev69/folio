@@ -8,4 +8,4 @@ export type Replay = {
   close: () => Promise<void>;
 };
 
-export function startReplay(options?: { port?: number; password?: string; flaky?: boolean; heartbeatMs?: number; pending?: boolean }): Promise<Replay>;
+export function startReplay(options?: { port?: number; password?: string; flaky?: boolean; heartbeatMs?: number; pending?: boolean; files?: Record<string, string> }): Promise<Replay>;

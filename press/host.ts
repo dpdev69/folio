@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -170,6 +170,18 @@ export async function writeBookFile(directory: string, file: string, content: st
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "The file was not written." };
+  }
+}
+
+/** Remove a file in the book (never a folder), through the same guard as a write. */
+export async function removeBookFile(directory: string, file: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const target = inside(directory, file);
+    if ((await lstat(target)).isDirectory()) throw new Error(`${file} is a folder, not a file.`);
+    await unlink(target);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "The file was not removed." };
   }
 }
 

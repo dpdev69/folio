@@ -191,6 +191,21 @@ export function reversePatch(current: string, patch: string): string | null {
   return lines.join("\n") + (endsWithNewline ? "\n" : "");
 }
 
+/**
+ * Whether a patch creates its file (nothing on the old side) or removes it
+ * (nothing on the new side): git's `/dev/null` headers, or failing those,
+ * hunks that all start from or end in zero lines.
+ */
+export function patchSides(patch: string): { oldEmpty: boolean; newEmpty: boolean } {
+  const text = patch.replace(/\r\n/g, "\n");
+  const hunks = [...text.matchAll(new RegExp(HUNK.source, "gm"))];
+  const all = (side: 2 | 4) => hunks.length > 0 && hunks.every((h) => h[side] !== undefined && Number(h[side]) === 0);
+  return {
+    oldEmpty: /^--- \/dev\/null$/m.test(text) || /^new file mode/m.test(text) || all(2),
+    newEmpty: /^\+\+\+ \/dev\/null$/m.test(text) || /^deleted file mode/m.test(text) || all(4),
+  };
+}
+
 /** Where `block` sits in `lines`, nearest `expected` first, never before `floor`. */
 function findBlock(lines: string[], block: string[], expected: number, floor: number): number | null {
   for (let distance = 0; distance <= FUZZ; distance++) {

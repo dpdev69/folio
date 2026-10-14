@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, wri
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { inside, readBookFile, servePress, stopPress, writeBookFile } from "./host";
+import { inside, readBookFile, removeBookFile, servePress, stopPress, writeBookFile } from "./host";
 
 describe("the write guard", () => {
   let base: string;
@@ -43,6 +43,24 @@ describe("the write guard", () => {
     expect((await writeBookFile(book, "gone/file.txt", "planted\n")).ok).toBe(false);
     expect(existsSync(path.join(outside, "planted.txt"))).toBe(false);
     expect(existsSync(path.join(outside, "missing-dir"))).toBe(false);
+  });
+
+  it("removes a file inside the book, and nothing else", async () => {
+    writeFileSync(path.join(book, "src/new.ts"), "x\n");
+    expect(await removeBookFile(book, "src/new.ts")).toEqual({ ok: true });
+    expect(existsSync(path.join(book, "src/new.ts"))).toBe(false);
+    expect((await removeBookFile(book, "src")).ok).toBe(false);
+    expect(existsSync(path.join(book, "src"))).toBe(true);
+    writeFileSync(path.join(outside, "keep.txt"), "keep\n");
+    expect((await removeBookFile(book, "../outside/keep.txt")).ok).toBe(false);
+    expect((await removeBookFile(book, path.join(outside, "keep.txt"))).ok).toBe(false);
+    symlinkSync(outside, path.join(book, "away"));
+    expect((await removeBookFile(book, "away/keep.txt")).ok).toBe(false);
+    symlinkSync("../outside/keep.txt", path.join(book, "link.txt"));
+    expect((await removeBookFile(book, "link.txt")).ok).toBe(false);
+    symlinkSync("../outside/missing.txt", path.join(book, "dangling.txt"));
+    expect((await removeBookFile(book, "dangling.txt")).ok).toBe(false);
+    expect(existsSync(path.join(outside, "keep.txt"))).toBe(true);
   });
 
   it("still follows a link that stays inside the book", () => {

@@ -35,7 +35,9 @@ function session(id, title, created, directory = DIRECTORY) {
  * Start the replay press. Resolves with its url, the requests it saw, and a
  * way to close it. `heartbeatMs` sets how often `: heartbeat` is sent.
  */
-export async function startReplay({ port = 0, password = "replay", flaky = false, heartbeatMs = 10_000, pending = false } = {}) {
+const GREET = "export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n";
+
+export async function startReplay({ port = 0, password = "replay", flaky = false, heartbeatMs = 10_000, pending = false, files = { "src/greet.ts": GREET } } = {}) {
   const editSse = readFileSync(join(fixtures, "fixture-edit.sse"), "utf8");
   const frames = editSse.split(/\n\n/).filter((frame) => frame.startsWith("data:"));
   const messages = JSON.parse(readFileSync(join(fixtures, "fixture-edit-messages.json"), "utf8")).data.slice().reverse();
@@ -205,8 +207,11 @@ export async function startReplay({ port = 0, password = "replay", flaky = false
     }
     if (/^\/api\/integration\/[^/]+\/connect\/key$/.test(path) && method === "POST") return send(res, 204);
     if (method === "GET" && path.startsWith("/api/fs/read/")) {
+      // As in 2.0.28: a missing file is a 404 FileNotFoundError.
+      const file = decodeURIComponent(path.slice("/api/fs/read/".length));
+      if (!(file in files)) return send(res, 404, { _tag: "FileNotFoundError", path: file, message: `File not found: ${file}` });
       res.writeHead(200, { "content-type": "application/octet-stream" });
-      res.end("export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n");
+      res.end(files[file]);
       return;
     }
     // The experimental write route is left out on purpose: a client falls back to its host.

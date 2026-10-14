@@ -43,6 +43,8 @@ export type Plate = {
   patch?: string;
   additions: number;
   deletions: number;
+  /** What the change did to the file, as the press reports it. */
+  change?: "added" | "deleted" | "modified";
   status: "open" | "accepted" | "reverted";
   folded: boolean;
 };
