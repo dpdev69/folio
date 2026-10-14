@@ -198,9 +198,25 @@ export async function refreshBook(client: EngineClient, book: Book): Promise<Boo
     let next = chapterFromMessages(chapter, await client.messages(chapter.id));
     const frame = await turnDiff(client, next).catch(() => null);
     if (frame) next = applyEvent({ ...book, chapters: [next] }, frame).chapters[0];
+    // The press's list of waiting asks and forms is the truth; if it cannot be read, keep what is held.
+    const waiting = await pendingFrames(client, chapter.id).catch(() => null);
+    if (waiting) next = waiting.reduce(applyEvent, { ...book, chapters: [{ ...next, asks: [], forms: [] }] }).chapters[0];
     chapters.push({ ...next, busy: running.has(next.id) });
   }
   return { ...book, chapters };
+}
+
+/**
+ * The asks and forms a session is waiting on, framed the way the stream sends
+ * them (`permission.asked {…request}`, `form.created {form}`), so the reducer
+ * sets them exactly as it sets live ones.
+ */
+export async function pendingFrames(client: EngineClient, sessionId: string): Promise<EventFrame[]> {
+  const [asks, forms] = await Promise.all([client.permissions(sessionId), client.forms(sessionId)]);
+  return [
+    ...asks.map((ask): EventFrame => ({ type: "permission.asked", data: { ...ask, sessionID: ask.sessionID ?? sessionId } })),
+    ...forms.map((form): EventFrame => ({ type: "form.created", data: { form: { ...form, sessionID: form.sessionID ?? sessionId } } })),
+  ];
 }
 
 /**

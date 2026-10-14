@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startReplay, type Replay } from "../../scripts/replay-press.mjs";
 import type { Book, Chapter, Plate } from "../book/model";
 import { EngineClient } from "../engine/client";
-import { CANNOT_REVERT, revertPlate } from "./press";
+import { CANNOT_REVERT, loadBook, refreshBook, revertPlate } from "./press";
 
 const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
@@ -46,5 +46,37 @@ describe("revertPlate", () => {
     const ch = chapter();
     await expect(revertPlate(client, book([ch]), ch, plate())).rejects.toThrow(CANNOT_REVERT);
     expect(replay.requests.length).toBe(0);
+  });
+});
+
+describe("pending asks and forms", () => {
+  it("are set on open, through the same reducer paths as the events", async () => {
+    replay = await startReplay({ password: "pw", pending: true });
+    const client = new EngineClient(replay.url, { password: "pw" });
+    const opened = await loadBook(client, DIRECTORY, { askBeforeWrite: true });
+    const first = opened.chapters.find((c) => c.id === SESSION)!;
+    expect(first.asks).toEqual([
+      expect.objectContaining({ id: "per_13784ca75001ULlav0hXATVSbe", permission: "edit", title: "May I edit src/greet.ts?" }),
+    ]);
+    expect(first.asks[0].patch).toContain("farewell");
+    expect(first.forms).toEqual([expect.objectContaining({ id: "frm_137858dc2001K01Vv8YDfRjzW1", title: "Questions" })]);
+    expect(first.forms[0].fields[0]).toMatchObject({ key: "q0", title: "Greet language" });
+    const second = opened.chapters.find((c) => c.id === "ses_second")!;
+    expect(second.asks).toEqual([]);
+    expect(second.forms).toEqual([]);
+  });
+
+  it("replace what the chapter held after an outage, and keep it when the press cannot list them", async () => {
+    replay = await startReplay({ password: "pw", pending: true });
+    const client = new EngineClient(replay.url, { password: "pw" });
+    const stale = { id: "per_answered_elsewhere", permission: "edit", patterns: [], title: "May I edit a.ts?" };
+    const staleForm = { id: "frm_gone", title: "Old", fields: [] };
+    const held = chapter({ asks: [stale], forms: [staleForm] });
+    const broken = chapter({ id: "ses_broken", asks: [stale], forms: [staleForm] });
+    const fresh = await refreshBook(client, book([held, broken]));
+    expect(fresh.chapters[0].asks.map((a) => a.id)).toEqual(["per_13784ca75001ULlav0hXATVSbe"]);
+    expect(fresh.chapters[0].forms.map((f) => f.id)).toEqual(["frm_137858dc2001K01Vv8YDfRjzW1"]);
+    expect(fresh.chapters[1].asks).toEqual([stale]);
+    expect(fresh.chapters[1].forms).toEqual([staleForm]);
   });
 });

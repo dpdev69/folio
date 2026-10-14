@@ -5,7 +5,8 @@
 // Usage: node scripts/replay-press.mjs [--port N] [--password PW] [--flaky]
 //
 // --flaky drops the first event stream right after its first frame, so a
-// client has to reconnect.
+// client has to reconnect. --pending starts with one ask and one form waiting
+// on the fixture session, as if they were raised while no client listened.
 
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -34,7 +35,7 @@ function session(id, title, created, directory = DIRECTORY) {
  * Start the replay press. Resolves with its url, the requests it saw, and a
  * way to close it. `heartbeatMs` sets how often `: heartbeat` is sent.
  */
-export async function startReplay({ port = 0, password = "replay", flaky = false, heartbeatMs = 10_000 } = {}) {
+export async function startReplay({ port = 0, password = "replay", flaky = false, heartbeatMs = 10_000, pending = false } = {}) {
   const editSse = readFileSync(join(fixtures, "fixture-edit.sse"), "utf8");
   const frames = editSse.split(/\n\n/).filter((frame) => frame.startsWith("data:"));
   const messages = JSON.parse(readFileSync(join(fixtures, "fixture-edit-messages.json"), "utf8")).data.slice().reverse();
@@ -46,6 +47,9 @@ export async function startReplay({ port = 0, password = "replay", flaky = false
     session("ses_elsewhere", "another book", 1791932900001, "/elsewhere"),
   ];
   sessions[2].parentID = SESSION;
+  // Pending requests, as `GET /api/session/{id}/permission` and `/form` list them.
+  const asked = pending ? [{ ...eventData(readFileSync(join(fixtures, "fixture-ask.sse"), "utf8"), "permission.asked"), sessionID: SESSION }] : [];
+  const forms = pending ? [{ ...eventData(readFileSync(join(fixtures, "aux-question.sse"), "utf8"), "form.created").form, sessionID: SESSION }] : [];
   const token = Buffer.from(`opencode:${password}`).toString("base64");
   const streams = new Set();
   const requests = [];
@@ -145,9 +149,23 @@ export async function startReplay({ port = 0, password = "replay", flaky = false
       return send(res, 200, { data: match[1] === SESSION ? diff : [] });
     }
     if (/^\/api\/session\/[^/]+\/interrupt$/.test(path) && method === "POST") return send(res, 200, { interrupted: true });
-    if (/^\/api\/session\/[^/]+\/permission\/[^/]+\/reply$/.test(path) && method === "POST") return send(res, 204);
-    if (/^\/api\/session\/[^/]+\/form\/[^/]+\/reply$/.test(path) && method === "POST") return send(res, 204);
-    if (/^\/api\/session\/[^/]+\/form\/[^/]+$/.test(path) && method === "DELETE") return send(res, 204);
+    if ((match = /^\/api\/session\/([^/]+)\/(permission|form)$/.exec(path)) && method === "GET") {
+      if (match[1] === "ses_broken") return send(res, 500, { _tag: "UnknownError", message: "The request store is unreadable." });
+      const list = match[2] === "permission" ? asked : forms;
+      return send(res, 200, { data: list.filter((item) => item.sessionID === match[1]) });
+    }
+    if ((match = /^\/api\/session\/[^/]+\/permission\/([^/]+)\/reply$/.exec(path)) && method === "POST") {
+      drop(asked, match[1]);
+      return send(res, 204);
+    }
+    if ((match = /^\/api\/session\/[^/]+\/form\/([^/]+)\/reply$/.exec(path)) && method === "POST") {
+      drop(forms, match[1]);
+      return send(res, 204);
+    }
+    if ((match = /^\/api\/session\/[^/]+\/form\/([^/]+)$/.exec(path)) && method === "DELETE") {
+      drop(forms, match[1]);
+      return send(res, 204);
+    }
     if (/^\/api\/session\/[^/]+\/model$/.test(path) && method === "POST") return send(res, 204);
     if (/^\/api\/session\/[^/]+\/synthetic$/.test(path) && method === "POST") {
       return send(res, 200, { data: { id: "msg_synthetic", type: "synthetic", payload: { text: body?.text }, delivery: "steer" } });
@@ -203,6 +221,21 @@ export async function startReplay({ port = 0, password = "replay", flaky = false
   };
 }
 
+/** The `data` of the first frame of `type` in a recorded stream. */
+function eventData(sse, type) {
+  for (const frame of sse.split(/\n\n/)) {
+    if (!frame.startsWith("data:")) continue;
+    const event = JSON.parse(frame.slice(5));
+    if (event.type === type) return event.data;
+  }
+  throw new Error(`No ${type} frame in the fixture.`);
+}
+
+function drop(list, id) {
+  const index = list.findIndex((item) => item.id === id);
+  if (index >= 0) list.splice(index, 1);
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const args = process.argv.slice(2);
   const value = (flag) => {
@@ -213,6 +246,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     port: Number(value("--port") ?? 0),
     password: value("--password") ?? "replay",
     flaky: args.includes("--flaky"),
+    pending: args.includes("--pending"),
   });
   // The same readiness line `opencode serve --stdio` prints.
   process.stdout.write(`${JSON.stringify({ url: replay.url })}\n`);

@@ -158,6 +158,23 @@ describe("EngineClient against the replay press", () => {
     expect((await client.models()).map((m) => m.id)).toEqual(["cat-jam-free", "big-pickle"]);
   });
 
+  it("lists the asks and forms a session is waiting on", async () => {
+    const { url, requests } = await press({ pending: true });
+    const client = new EngineClient(url, { password: "pw" });
+    const asks = await client.permissions(SESSION);
+    expect(requests.at(-1)).toMatchObject({ method: "GET", path: `/api/session/${SESSION}/permission` });
+    expect(asks.map((a) => a.id)).toEqual(["per_13784ca75001ULlav0hXATVSbe"]);
+    expect(asks[0]).toMatchObject({ action: "edit", resources: ["src/greet.ts"] });
+    const forms = await client.forms(SESSION);
+    expect(requests.at(-1)).toMatchObject({ method: "GET", path: `/api/session/${SESSION}/form` });
+    expect(forms.map((f) => f.id)).toEqual(["frm_137858dc2001K01Vv8YDfRjzW1"]);
+    expect(await client.permissions("ses_second")).toEqual([]);
+    await client.permissionReply(SESSION, asks[0].id, "once");
+    await client.formCancel(SESSION, forms[0].id);
+    expect(await client.permissions(SESSION)).toEqual([]);
+    expect(await client.forms(SESSION)).toEqual([]);
+  });
+
   it("lists key integrations and stores a key", async () => {
     const { url, requests } = await press();
     const client = new EngineClient(url, { password: "pw" });

@@ -29,6 +29,12 @@ export type FileDiff = { file: string; patch?: string; additions?: number; delet
 
 export type FormAnswer = Record<string, string | number | boolean | string[]>;
 
+/** A permission request the press is waiting on, as `permission.asked` carries it. */
+export type PendingPermission = { id: string; sessionID?: string; [key: string]: unknown };
+
+/** A form the press is waiting on, as `form.created` carries it in `form`. */
+export type PendingForm = { id: string; sessionID?: string; [key: string]: unknown };
+
 /** What the shell or the dev host can do when the press cannot. */
 export type FileHost = {
   writeFile?: (directory: string, path: string, content: string) => Promise<void>;
@@ -155,6 +161,18 @@ export class EngineClient {
     const body: Record<string, unknown> = { decision };
     if (message) body.message = message;
     await this.request("POST", `/api/session/${seg(sessionId)}/permission/${seg(requestId)}/reply`, { body });
+  }
+
+  /** Permission requests still waiting on the reader; raised during an outage, they are only found here. */
+  async permissions(sessionId: string): Promise<PendingPermission[]> {
+    const data = await this.request<unknown>("GET", `/api/session/${seg(sessionId)}/permission`);
+    return withIds<PendingPermission>(data);
+  }
+
+  /** Forms (questions) still waiting on the reader. */
+  async forms(sessionId: string): Promise<PendingForm[]> {
+    const data = await this.request<unknown>("GET", `/api/session/${seg(sessionId)}/form`);
+    return withIds<PendingForm>(data);
   }
 
   async formReply(sessionId: string, formId: string, answer: FormAnswer): Promise<void> {
@@ -392,6 +410,11 @@ function notFound(version: string | undefined): EngineError {
 /** The press has no such route, or could not do the write itself; the host may. */
 function fallsBack(error: unknown): boolean {
   return error instanceof EngineError && error.status !== 401 && error.status !== 0;
+}
+
+function withIds<T extends { id: string }>(data: unknown): T[] {
+  if (!Array.isArray(data)) return [];
+  return data.filter((item): item is T => Boolean(item) && typeof item === "object" && typeof (item as { id?: unknown }).id === "string");
 }
 
 function seg(value: string): string {
