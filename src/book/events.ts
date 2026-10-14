@@ -13,7 +13,7 @@ import { applyDiff, diffPlateId, dropPlate, filesOf, toolPlate } from "./plates"
 import { NOTE_PREFIX, parseNote } from "./notes";
 import { footnoteSentence, isEdit, type ToolLike } from "./tools";
 import { numberOf, recordOf, stringOf, type Data } from "./values";
-import { stripThink } from "./think";
+import { shownProse, stripThink } from "./think";
 import { samePath } from "./paths";
 
 /**
@@ -294,7 +294,9 @@ export function setText(
   else if (mode === "append") next = stripThink(prev.text + text);
   else {
     const whole = stripThink(text);
-    next = whole.length >= prev.text.length ? whole : prev.text;
+    // A part held back as unfinished reasoning (`<think>…` with no close yet) is no text to keep.
+    const held = shownProse(prev.text) ? prev.text : "";
+    next = whole.length >= held.length ? whole : prev.text;
   }
   const turn = assistantMessageID ? chapter.turns?.[assistantMessageID] : undefined;
   const owner = turn ? chapter.notes.find((n) => n.pending && n.messageId === turn) : undefined;
@@ -536,8 +538,8 @@ function endsSentence(before: string): boolean {
   const word = /(\S*)$/.exec(before)?.[1] ?? "";
   const bare = word.replace(/^[("'“‘[*_]+/, "");
   if (ABBREVIATIONS.test(bare)) return false;
-  // A single letter is an initial ("J. Smith").
-  if (/^\p{L}$/u.test(bare)) return false;
+  // A single letter is an initial ("J. Smith"); "I" is far more often the pronoun ("than I.").
+  if (/^\p{L}$/u.test(bare) && bare !== "I") return false;
   // A number alone at the start of a line is a list's ("1. Read the file").
   if (/^\d+$/.test(bare) && /(^|\n)[ \t]*$/.test(before.slice(0, before.length - word.length))) return false;
   return true;

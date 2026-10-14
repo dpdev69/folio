@@ -26,9 +26,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAC_APP_BINARY = "/Applications/OpenCode.app/Contents/Resources/opencode-cli";
 const TIMEOUT_MS = 10 * 60 * 1000;
 
-/** Quote a string as a PowerShell single-quoted literal: nothing interpolates, quotes are doubled. */
+/**
+ * Quote a string as a PowerShell single-quoted literal: nothing interpolates, quotes are doubled.
+ * PowerShell also takes the typographic single quotes (U+2018 to U+201B) as quote marks, so they
+ * are doubled too.
+ */
 export function psQuote(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
+  return `'${String(value).replace(/['\u2018\u2019\u201A\u201B]/g, "$&$&")}'`;
 }
 
 /** The PowerShell command that unpacks a zip, with both paths quoted safely. */

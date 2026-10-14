@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EngineClient, ModelInfo, ModelRef, ProviderInfo } from "../engine/client";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { keyProviders, pressSummary, type PressPhase } from "../welcome/copy";
@@ -56,6 +56,9 @@ export function usePress(deps: PressDeps) {
     if (restartTimer.current != null) clearTimeout(restartTimer.current);
     restartTimer.current = null;
   }
+
+  // A restart waiting out its backoff is not left to fire after Folio has gone.
+  useEffect(() => () => clearRestartTimer(), []);
 
   /** The stream has held: the next restart, if one is needed, may go at once. */
   function steady() {

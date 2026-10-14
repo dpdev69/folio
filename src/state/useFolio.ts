@@ -479,8 +479,10 @@ export function useFolio() {
   }
 
   function turn(forward: boolean) {
+    // The nav itself is reduced against the latest state: a curl that finished (or began) since this
+    // render must not be written back over. Only the new-chapter decision reads the rendered nav.
     const result = reduceNav(nav, { type: "turn", forward, spreadCount });
-    setNav(result.nav);
+    setNav((current) => reduceNav(current, { type: "turn", forward, spreadCount }).nav);
     if (result.effect === "new-chapter") void createChapter();
   }
 
@@ -796,29 +798,29 @@ export function useFolio() {
       setNav((current) => ({ ...current, margin: true }));
     },
     turn,
-    jump: (spread: number) => setNav(reduceNav(nav, { type: "jump", spread }).nav),
+    jump: (spread: number) => setNav((current) => reduceNav(current, { type: "jump", spread }).nav),
     showContents: () => {
       setMenuOpen(false);
       setSearchOpen(false);
       if (!book) return;
-      setNav(reduceNav(nav, { type: "contents" }).nav);
+      setNav((current) => reduceNav(current, { type: "contents" }).nav);
     },
-    closeContents: () => setNav(reduceNav(nav, { type: "close-contents" }).nav),
+    closeContents: () => setNav((current) => reduceNav(current, { type: "close-contents" }).nav),
     setNavDesk: () => {
       setMenuOpen(false);
-      setNav(reduceNav(nav, { type: "desk" }).nav);
+      setNav((current) => reduceNav(current, { type: "desk" }).nav);
     },
     showColophon: () => {
       setMenuOpen(false);
       setSearchOpen(false);
-      setNav(reduceNav(nav, { type: "colophon" }).nav);
+      setNav((current) => reduceNav(current, { type: "colophon" }).nav);
     },
-    closeColophon: () => setNav(reduceNav(nav, { type: "close-colophon", hadBook: Boolean(book) }).nav),
+    closeColophon: () => setNav((current) => reduceNav(current, { type: "close-colophon", hadBook: Boolean(book) }).nav),
     searchHits,
     curlDone: () => setNav((current) => reduceNav(current, { type: "curl-done" }).nav),
-    closeMargin: () => setNav(reduceNav(nav, { type: "margin", open: false }).nav),
-    openPlate: (id: string) => setNav(reduceNav(nav, { type: "open-plate", id }).nav),
-    foldOpenPlate: () => setNav(reduceNav(nav, { type: "fold-plate" }).nav),
+    closeMargin: () => setNav((current) => reduceNav(current, { type: "margin", open: false }).nav),
+    openPlate: (id: string) => setNav((current) => reduceNav(current, { type: "open-plate", id }).nav),
+    foldOpenPlate: () => setNav((current) => reduceNav(current, { type: "fold-plate" }).nav),
     foldPlate: (id: string) => mutatePlate(id, (plate) => ({ ...plate, folded: !plate.folded })),
     acceptPlate: (id: string) => mutatePlate(id, (plate) => (plate.status === "reverting" ? plate : { ...plate, status: "accepted" })),
     rejectPlate: (id: string) => void rejectPlate(id),
@@ -840,7 +842,7 @@ export function useFolio() {
     togglePlace: () => setPlace((current) => (current === nav.spread ? null : nav.spread)),
     goToPlace: () => {
       if (place == null) return;
-      setNav(reduceNav(nav, { type: "jump", spread: place }).nav);
+      setNav((current) => reduceNav(current, { type: "jump", spread: place }).nav);
     },
     stop: () => {
       const chapter = chapterForSpread(nav.spread);

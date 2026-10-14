@@ -62,6 +62,8 @@ describe("PowerShell command", () => {
   it("single-quotes and doubles embedded quotes", () => {
     expect(psQuote("C:\\Users\\O'Brien\\a.zip")).toBe("'C:\\Users\\O''Brien\\a.zip'");
     expect(psQuote("$env:TEMP `x`")).toBe("'$env:TEMP `x`'");
+    // PowerShell ends a single-quoted string at a typographic quote too.
+    expect(psQuote("C:\\Users\\O\u2019Brien")).toBe("'C:\\Users\\O\u2019\u2019Brien'");
   });
   it("builds Expand-Archive with both paths quoted", () => {
     expect(expandArchiveCommand("C:\\t m\\o'c.zip", "C:\\out")).toBe(

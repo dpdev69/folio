@@ -1,4 +1,4 @@
-import { useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { applyEvent } from "../book/events";
 import type { Book, Chapter } from "../book/model";
 import type { EngineClient } from "../engine/client";
@@ -41,6 +41,9 @@ export function useStream(deps: StreamDeps) {
     abortRef.current = null;
     queueRef.current = null;
   }
+
+  // The stream ends with the hook that listens to it.
+  useEffect(() => () => stop(), []);
 
   /** A local change to the book, after any frames still waiting to be set. */
   function editBook(edit: SetStateAction<Book | null>) {

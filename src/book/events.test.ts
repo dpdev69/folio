@@ -989,6 +989,13 @@ describe("following the reader's prose as the press writes it", () => {
     next = applyEvent(next, ev("session.text.ended", { assistantMessageID: AID, ordinal: 1, text: "<think>Weigh it up.</think>Answer." }));
     expect(next.chapters[0].blocks.map((b) => b.text)).toEqual(["Done.", "Answer."]);
   });
+
+  it("takes the finished text over reasoning that never closed in the deltas", () => {
+    let next = play(book(), [delta(0, "<think>Weigh it up at length, every side of it")]);
+    expect(next.chapters[0].blocks[0].text.startsWith("<think>")).toBe(true);
+    next = applyEvent(next, ev("session.text.ended", { assistantMessageID: AID, ordinal: 0, text: "<think>Weigh it.</think>Yes." }));
+    expect(next.chapters[0].blocks.map((b) => b.text)).toEqual(["Yes."]);
+  });
 });
 
 describe("sentence ends", () => {
@@ -1006,6 +1013,7 @@ describe("sentence ends", () => {
     expect(sentenceEnd("I bumped it to version 2. Then I ran")).toBe("I bumped it to version 2.".length);
     expect(sentenceEnd("Use a flag, e.g. --watch. Then")).toBe("Use a flag, e.g. --watch.".length);
     expect(sentenceEnd("Why? Because")).toBe("Why?".length);
+    expect(sentenceEnd("It was shorter than I. Then")).toBe("It was shorter than I.".length);
   });
 });
 

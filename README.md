@@ -79,7 +79,7 @@ npm run fetch-press -- --dest /some/folder
 ## Book
 
 - Turning inside a chapter moves through its pages. Turning forward past the last page of the last chapter starts a new chapter. Streaming that fills a page turns forward on its own.
-- The curl is about 450ms. Reduced motion uses a short fade.
+- The curl is about 450 ms: the leaf lifts a few pixels, swings on a long perspective so it never grows past the book, and casts a shadow on the page it uncovers; the back turn is its mirror. Lines and footnotes settle in as they are laid, a plate is laid over the page and lifted off it, the margin slides in from the gutter, and the menus pop from their buttons. Reduced motion (the system setting) turns all of it into short fades.
 - The quill is the lined field at the foot of the page. Press Return twice to send; a single Return makes a new line.
 - Highlight a passage to write in the margin. The highlighted text is the context. The reply sits next to the note, and can replace the passage.
 - Tool calls are footnotes. A footnote that made a change ends with a link, "See Plate N", which opens that plate.
@@ -104,7 +104,7 @@ The type button at the right of the title bar opens Themes & Settings.
 - Six themes: Original, Quiet, Paper, Bold, Calm, and Focus. Each is a typeface and a palette in both appearances.
 - **Customize** sets line spacing, margins, and justified text. **Reset** puts those three back.
 
-The choices are remembered in the window's `localStorage` under `folio.settings`.
+The choices are remembered in the window's `localStorage` under `folio.settings`. A small script in `index.html` reads them before the first paint and sets the theme, the appearance and the desk and page colours, so a dark reading room never flashes light; the packaged app allows it by its hash in the content security policy, and a test keeps the hash in step. Every theme keeps ink, the running title and terra above 4.5:1 on the page in both appearances, and a test holds the palettes to it.
 
 ## Staying with the press
 

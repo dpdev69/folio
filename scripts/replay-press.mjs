@@ -10,15 +10,16 @@
 
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "book", "__fixtures__");
 const VERSION = "2.0.28";
 // The folder the replayed sessions claim to belong to. It is only a label; nothing is read from it.
+// It is the folder the recorded fixtures name (FIXTURE_DIRECTORY in src/book/__fixtures__/load.ts), so
+// the frames replayed after a prompt belong to the same book; tmpdir() is /var/folders/… on macOS.
 // Override with FOLIO_REPLAY_DIRECTORY.
-export const REPLAY_DIRECTORY = process.env.FOLIO_REPLAY_DIRECTORY ?? join(tmpdir(), "folio-replay", "repo");
+export const REPLAY_DIRECTORY = process.env.FOLIO_REPLAY_DIRECTORY ?? "/tmp/folio-replay/repo";
 const DIRECTORY = REPLAY_DIRECTORY;
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
 const PROMPT_ID = "msg_1378318cd0011en9zAGWcvx4bC";
