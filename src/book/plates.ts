@@ -86,7 +86,9 @@ export function dropPlate(plates: Plate[], id: string): Plate[] {
  * The diff sets a plate's lines, never a patch the plate already has: a tool's
  * patch covers that one edit, while the turn's patch covers every edit to the
  * file, and Reject reverses `plate.patch`. A diff patch only fills a plate that
- * has none, and an `unscoped` diff (the whole session's) fills none at all.
+ * has none and is the turn's only plate for the file (with two, the turn's
+ * patch is neither one's, so Reject refuses), and an `unscoped` diff (the
+ * whole session's) fills none at all.
  */
 export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string | undefined, unscoped = false): Chapter {
   if (!Array.isArray(raw)) return chapter;
@@ -95,7 +97,10 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
     const diff = fileDiffOf(item);
     if (!diff) continue;
     const lines = diff.patch ? parsePatch(diff.patch) : [];
-    const existing = plates.filter((p) => p.file === diff.file && p.turnMessageId === turnMessageId).pop();
+    const same = plates.filter((p) => p.file === diff.file && p.turnMessageId === turnMessageId);
+    const existing = same[same.length - 1];
+    // The turn's patch covers every edit to the file in the turn; it is a plate's own only if that plate is the only one.
+    const owns = !unscoped && same.length <= 1;
     if (!existing && !lines.length) continue;
     const id = existing?.id ?? diffPlateId(diff.file, turnMessageId);
     const plate: Plate = {
@@ -107,7 +112,7 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
       title: existing?.title ?? basename(diff.file),
       caption: captionFor(diff.status, diff.file),
       lines: lines.length ? lines : existing!.lines,
-      patch: existing?.patch ?? (lines.length && !unscoped ? diff.patch : undefined),
+      patch: existing?.patch ?? (lines.length && owns ? diff.patch : undefined),
       additions: diff.additions ?? existing?.additions ?? count(lines, "add"),
       deletions: diff.deletions ?? existing?.deletions ?? count(lines, "del"),
       ...changeOf(diff.status ?? existing?.change),

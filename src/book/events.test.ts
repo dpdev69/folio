@@ -241,6 +241,29 @@ describe("the session diff (folio.diff)", () => {
     expect(reversePatch("export {};\nwave2\nwave1\n", second.patch!)).toBe("export {};\nwave1\n");
   });
 
+  it("gives the turn's patch to a patchless tool plate only when it is the turn's one plate for the file", () => {
+    const toolPlate = (id: string, n: number) => ({
+      id,
+      n,
+      turnMessageId: "msg_u1",
+      file: "src/greet.ts",
+      title: "greet.ts",
+      caption: "",
+      lines: [{ kind: "add" as const, text: "x" }],
+      additions: 1,
+      deletions: 0,
+      status: "open" as const,
+      folded: false,
+    });
+    const diff = [{ file: "src/greet.ts", patch: patch(["wave1", "wave2"]), status: "modified" }];
+    const two = { ...book().chapters[0], plates: [toolPlate("plate-a", 1), toolPlate("plate-b", 2)] };
+    const shared = applyDiff(two, diff, "msg_u1");
+    // The turn's patch covers both edits; neither plate may take it as its own, so Reject refuses.
+    expect(shared.plates.map((p) => p.patch)).toEqual([undefined, undefined]);
+    const one = { ...book().chapters[0], plates: [toolPlate("plate-a", 1)] };
+    expect(applyDiff(one, diff, "msg_u1").plates[0].patch).toBe(diff[0].patch);
+  });
+
   it("names a diff plate by its file alone only when no turn is known", () => {
     const bare = book().chapters[0];
     const diff = [{ file: "src/greet.ts", patch: patch(["wave"]), status: "modified" }];
