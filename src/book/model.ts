@@ -111,6 +111,8 @@ export type Chapter = {
   notice?: string;
   /** Files changed since the plates were last set from the session diff. */
   diffStale?: boolean;
+  /** The session's own rules make the press ask before it edits (see `asksFirst`). */
+  askRules?: boolean;
 };
 
 export type Book = {
@@ -174,4 +176,18 @@ export function isUntitled(title: string | undefined): boolean {
 
 export function displayTitle(chapter: Chapter): string {
   return chapter.untitled ? "Untitled, in progress" : chapter.title;
+}
+
+/**
+ * Whether a session's own permission rules make the press ask before an edit:
+ * the last rule for edits (or for every action) decides, as in opencode.
+ */
+export function asksFirst(rules: unknown): boolean {
+  if (!Array.isArray(rules)) return false;
+  let asks = false;
+  for (const rule of rules) {
+    const r = rule && typeof rule === "object" ? (rule as Record<string, unknown>) : undefined;
+    if (r && (r.action === "edit" || r.action === "*")) asks = r.effect === "ask";
+  }
+  return asks;
 }

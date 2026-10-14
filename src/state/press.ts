@@ -4,7 +4,7 @@
  * undo a plate. The hook keeps the state; these keep the order of calls.
  */
 import { applyEvent } from "../book/events";
-import { isUntitled, type Book, type Chapter, type Plate } from "../book/model";
+import { asksFirst, isUntitled, type Book, type Chapter, type Plate } from "../book/model";
 import { chapterFromMessages } from "../book/transcript";
 import {
   EngineClient,
@@ -26,6 +26,21 @@ export const ASK_RULES: PermissionRule[] = [
   { action: "edit", resource: "*", effect: "ask" },
   { action: "shell", resource: "*", effect: "ask" },
 ];
+
+export { asksFirst };
+
+/**
+ * Give each chapter the ask rules (on) or clear its own rules (off: `[]`, so
+ * the agent's defaults apply and edits go ahead). Verified against 2.0.28:
+ * PATCH replaces the session's rules and takes effect on the next tool call.
+ */
+export async function applyAskRules(client: EngineClient, ids: string[], on: boolean): Promise<{ done: string[]; failed: string[] }> {
+  const results = await Promise.allSettled(ids.map((id) => client.setPermissions(id, on ? ASK_RULES : [])));
+  const done: string[] = [];
+  const failed: string[] = [];
+  results.forEach((result, i) => (result.status === "fulfilled" ? done : failed).push(ids[i]));
+  return { done, failed };
+}
 
 /** Sent with "No" on an ask, so the turn goes on without the change. */
 export const DECLINE_MESSAGE = "The reader declined this change; continue without it.";
@@ -225,7 +240,13 @@ export async function loadBook(
 ): Promise<Book> {
   let sessions = await client.sessions(directory);
   if (!sessions.length) sessions = [await openChapter(client, directory, opts)];
-  return refreshBook(client, bookFromSessions(directory, sessions));
+  let book = bookFromSessions(directory, sessions);
+  if (opts.askBeforeWrite) {
+    // The reader asked for this before the book was open; chapters without the rules get them now.
+    const { done } = await applyAskRules(client, book.chapters.filter((c) => !c.askRules).map((c) => c.id), true);
+    book = { ...book, chapters: book.chapters.map((c) => (done.includes(c.id) ? { ...c, askRules: true } : c)) };
+  }
+  return refreshBook(client, book);
 }
 
 /**
@@ -330,6 +351,7 @@ export function bookFromSessions(directory: string, sessions: SessionInfo[]): Bo
         asks: [],
         forms: [],
         busy: false,
+        askRules: asksFirst(session.permissions),
       })),
   };
 }
@@ -368,6 +390,25 @@ export function loadChosenModel(storage: ModelStorage | null = browserStorage())
     return { providerID: value.providerID, id: value.id };
   } catch {
     return null;
+  }
+}
+
+const ASK_KEY = "folio.askBeforeWrite";
+
+/** Whether the reader asked the press to ask before it writes; off unless they did. */
+export function loadAskBeforeWrite(storage: ModelStorage | null = browserStorage()): boolean {
+  try {
+    return storage?.getItem(ASK_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function saveAskBeforeWrite(on: boolean, storage: ModelStorage | null = browserStorage()): void {
+  try {
+    storage?.setItem(ASK_KEY, on ? "true" : "false");
+  } catch {
+    // Without storage the setting lasts until the window closes.
   }
 }
 

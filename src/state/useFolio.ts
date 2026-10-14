@@ -15,7 +15,11 @@ import { DEFAULT_SCALE_INDEX, SCALES, footChars, footFont, footReserve, inkFont,
 import { useSettings } from "./useSettings";
 import { keyProviders, pressSummary, type PressPhase } from "../welcome/copy";
 import {
+  applyAskRules,
+  ASK_RULES,
   DECLINE_MESSAGE,
+  loadAskBeforeWrite,
+  saveAskBeforeWrite,
   isTauri,
   loadBook,
   messageOf,
@@ -45,7 +49,7 @@ export function useFolio() {
   const [savingKey, setSavingKey] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [selection, setSelection] = useState<string | null>(null);
-  const [askBeforeWrite, setAskBeforeWrite] = useState(false);
+  const [askBeforeWrite, setAskBeforeWrite] = useState(() => loadAskBeforeWrite());
   const [engineState, setEngineState] = useState<EngineState>("off");
   const [engineVersion, setEngineVersion] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -567,7 +571,12 @@ export function useFolio() {
         current
           ? applyEvent(current, {
               type: "session.created",
-              data: { sessionID: created.id, title: created.title, location: { directory: current.directory } },
+              data: {
+                sessionID: created.id,
+                title: created.title,
+                location: { directory: current.directory },
+                permissions: created.permissions ?? (askBeforeWrite ? ASK_RULES : []),
+              },
             })
           : current,
       );
@@ -607,6 +616,27 @@ export function useFolio() {
       return;
     }
     mutatePlate(id, (plate) => ({ ...plate, status: "reverted", folded: true }));
+  }
+
+  /**
+   * Ask before the press writes, or stop asking: remembered for the next
+   * launch, and set on every chapter of the open book (new chapters get it
+   * when they are made). Each chapter's hint reads the rules it really holds.
+   */
+  async function toggleAsk() {
+    const on = !askBeforeWrite;
+    setAskBeforeWrite(on);
+    saveAskBeforeWrite(on);
+    const client = clientRef.current;
+    const current = bookRef.current;
+    if (!client || !current || current.sample) return;
+    const { done, failed } = await applyAskRules(client, current.chapters.map((c) => c.id), on);
+    setBook((latest) =>
+      latest && latest.id === current.id
+        ? { ...latest, chapters: latest.chapters.map((c) => (done.includes(c.id) ? { ...c, askRules: on } : c)) }
+        : latest,
+    );
+    if (failed.length) setNotice("The press did not take the new rule for every chapter; those chapters keep their old one.");
   }
 
   /** "Allow once", or "No" with a message so the turn goes on without the change. */
@@ -820,7 +850,7 @@ export function useFolio() {
     theme,
     appearance,
     askBeforeWrite,
-    toggleAsk: () => setAskBeforeWrite((value) => !value),
+    toggleAsk: () => void toggleAsk(),
     engineState,
     engineLabel,
     notice,

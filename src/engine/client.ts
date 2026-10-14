@@ -7,6 +7,8 @@ export type SessionInfo = {
   parentID?: string;
   location?: { directory?: string };
   model?: ModelRef;
+  /** The session's own permission rules, on top of its agent's. */
+  permissions?: PermissionRule[];
   time?: { created?: number; updated?: number; idle?: number };
 };
 
@@ -135,6 +137,15 @@ export class EngineClient {
     if (input.model) body.model = { providerID: input.model.providerID, id: input.model.id };
     if (input.permissions) body.permissions = input.permissions;
     return this.request<SessionInfo>("POST", "/api/session", { body });
+  }
+
+  /**
+   * Replace a session's own permission rules. In 2.0.28 the list given
+   * replaces the old one, `[]` leaves only the agent's defaults (the `build`
+   * agent allows edits), and `null` changes nothing.
+   */
+  async setPermissions(sessionId: string, permissions: PermissionRule[]): Promise<void> {
+    await this.request("PATCH", `/api/session/${seg(sessionId)}`, { body: { permissions } });
   }
 
   /** A session's history, oldest first, across every page. */

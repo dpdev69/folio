@@ -1,4 +1,5 @@
 import {
+  asksFirst,
   isUntitled,
   type Book,
   type Chapter,
@@ -47,6 +48,10 @@ function reduceChapter(chapter: Chapter, type: string, data: Data, directory?: s
   switch (type) {
     case "session.renamed":
       return retitle(chapter, stringOf(data.title));
+    case "session.permissions": {
+      const askRules = asksFirst(data.permissions);
+      return Boolean(chapter.askRules) === askRules ? chapter : { ...chapter, askRules };
+    }
     case "session.execution.started":
       return { ...chapter, busy: true, error: undefined };
     case "session.execution.succeeded":
@@ -157,6 +162,7 @@ function addChapterShell(book: Book, data: Data, location: Data | undefined): Bo
     asks: [],
     forms: [],
     busy: false,
+    askRules: asksFirst(data.permissions),
   };
   return { ...book, chapters: [...book.chapters, chapter] };
 }

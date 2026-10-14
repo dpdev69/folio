@@ -2,7 +2,23 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startReplay, type Replay } from "../../scripts/replay-press.mjs";
 import type { Book, Chapter, Plate } from "../book/model";
 import { EngineClient } from "../engine/client";
-import { CANNOT_REVERT, defaultModelChoice, loadBook, loadChosenModel, offeredModels, refreshBook, revertNote, revertPlate, saveChosenModel, turnDiff } from "./press";
+import {
+  applyAskRules,
+  ASK_RULES,
+  asksFirst,
+  CANNOT_REVERT,
+  defaultModelChoice,
+  loadAskBeforeWrite,
+  loadBook,
+  loadChosenModel,
+  offeredModels,
+  refreshBook,
+  revertNote,
+  revertPlate,
+  saveAskBeforeWrite,
+  saveChosenModel,
+  turnDiff,
+} from "./press";
 
 const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
@@ -195,5 +211,59 @@ describe("the reader's model", () => {
     };
     expect(loadChosenModel(broken)).toBeNull();
     expect(() => saveChosenModel({ providerID: "opencode", id: "x" }, broken)).not.toThrow();
+  });
+});
+
+describe("asking before the press writes", () => {
+  it("reads a chapter's own rules: the last rule for edits decides", () => {
+    expect(asksFirst(ASK_RULES)).toBe(true);
+    expect(asksFirst([{ action: "*", resource: "*", effect: "ask" }])).toBe(true);
+    expect(asksFirst([])).toBe(false);
+    expect(asksFirst(undefined)).toBe(false);
+    expect(asksFirst([{ action: "shell", resource: "*", effect: "ask" }])).toBe(false);
+    expect(asksFirst([...ASK_RULES, { action: "edit", resource: "*", effect: "allow" }])).toBe(false);
+  });
+
+  it("sets the rules on every chapter it is given: ask rules on, an empty list off", async () => {
+    const { replay, client } = await press();
+    const on = await applyAskRules(client, [SESSION, "ses_second"], true);
+    expect(on).toEqual({ done: [SESSION, "ses_second"], failed: [] });
+    const off = await applyAskRules(client, [SESSION, "ses_missing"], false);
+    expect(off).toEqual({ done: [SESSION], failed: ["ses_missing"] });
+    const patches = replay.requests.filter((r) => r.method === "PATCH");
+    expect(patches.map((r) => [r.path, r.body])).toEqual([
+      [`/api/session/${SESSION}`, { permissions: ASK_RULES }],
+      ["/api/session/ses_second", { permissions: ASK_RULES }],
+      [`/api/session/${SESSION}`, { permissions: [] }],
+      ["/api/session/ses_missing", { permissions: [] }],
+    ]);
+  });
+
+  it("gives an open book's chapters the rules when the reader asked for them, and says which chapters hold them", async () => {
+    const { replay, client } = await press();
+    const plain = await loadBook(client, DIRECTORY, { askBeforeWrite: false });
+    expect(plain.chapters.map((c) => c.askRules)).toEqual([false, false]);
+    expect(replay.requests.some((r) => r.method === "PATCH")).toBe(false);
+    const asking = await loadBook(client, DIRECTORY, { askBeforeWrite: true });
+    expect(asking.chapters.map((c) => c.askRules)).toEqual([true, true]);
+    // The press keeps them; a second open finds them and patches nothing more.
+    const before = replay.requests.filter((r) => r.method === "PATCH").length;
+    const again = await loadBook(client, DIRECTORY, { askBeforeWrite: true });
+    expect(again.chapters.map((c) => c.askRules)).toEqual([true, true]);
+    expect(replay.requests.filter((r) => r.method === "PATCH").length).toBe(before);
+  });
+
+  it("is remembered under folio.askBeforeWrite, and nothing breaks when storage does", () => {
+    const data = new Map<string, string>();
+    const storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) };
+    expect(loadAskBeforeWrite(storage)).toBe(false);
+    saveAskBeforeWrite(true, storage);
+    expect(data.get("folio.askBeforeWrite")).toBe("true");
+    expect(loadAskBeforeWrite(storage)).toBe(true);
+    saveAskBeforeWrite(false, storage);
+    expect(loadAskBeforeWrite(storage)).toBe(false);
+    const broken = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => undefined };
+    expect(loadAskBeforeWrite(broken)).toBe(false);
+    expect(() => saveAskBeforeWrite(true, broken)).not.toThrow();
   });
 });

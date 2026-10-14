@@ -55,6 +55,7 @@ export function PageFace({
   onOpenPlate?: (plateId: string) => void;
   busy: boolean;
   onStop: () => void;
+  /** The chapter's own rules make the press ask before it writes. */
   askBeforeWrite: boolean;
 }) {
   const proseRef = useRef<HTMLDivElement>(null);

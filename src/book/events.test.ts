@@ -379,6 +379,19 @@ describe("events", () => {
     expect(next.chapters.map((c) => c.id)).toEqual(["ses_3"]);
   });
 
+  it("knows whether a chapter asks before the press writes, from its rules", () => {
+    const asking = applyEvent(book(), ev("session.permissions", { permissions: [{ action: "edit", resource: "*", effect: "ask" }] }));
+    expect(asking.chapters[0].askRules).toBe(true);
+    const plain = applyEvent(asking, ev("session.permissions", { permissions: [] }));
+    expect(plain.chapters[0].askRules).toBe(false);
+    expect(applyEvent(plain, ev("session.permissions", { permissions: [] }))).toBe(plain);
+    const created = applyEvent(book(), {
+      type: "session.created",
+      data: { sessionID: "ses_4", location: { directory: "/repos/api-server" }, permissions: [{ action: "edit", resource: "*", effect: "ask" }] },
+    });
+    expect(created.chapters[1].askRules).toBe(true);
+  });
+
   it("never opens a chapter for a subagent's session", () => {
     const start = book();
     const child: Frame = {

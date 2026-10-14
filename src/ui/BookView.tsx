@@ -231,7 +231,7 @@ function BoundPage({
       onOpenPlate={folio.openPlate}
       busy={Boolean(chapter?.busy)}
       onStop={folio.stop}
-      askBeforeWrite={folio.askBeforeWrite}
+      askBeforeWrite={Boolean(chapter?.askRules)}
     />
   );
 }

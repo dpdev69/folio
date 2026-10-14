@@ -119,6 +119,14 @@ export async function startReplay({ port = 0, password = "replay", flaky = false
       return send(res, 200, { data: created });
     }
     if (method === "GET" && path === "/api/session/active") return send(res, 200, { data: {} });
+    if ((match = /^\/api\/session\/([^/]+)$/.exec(path)) && method === "PATCH") {
+      // As in 2.0.28: the rules given replace the session's own; an empty list leaves the agent's defaults.
+      const found = sessions.find((s) => s.id === match[1]);
+      if (!found) return send(res, 404, { _tag: "SessionNotFoundError", sessionID: match[1], message: `Session not found: ${match[1]}` });
+      if (typeof body?.title === "string") found.title = body.title;
+      if (Array.isArray(body?.permissions)) found.permissions = body.permissions;
+      return send(res, 204);
+    }
     if ((match = /^\/api\/session\/([^/]+)\/message$/.exec(path)) && method === "GET") {
       // As in 2.0.28: the first page names the order, and a cursor carries it from then on.
       const cursor = url.searchParams.get("cursor");
