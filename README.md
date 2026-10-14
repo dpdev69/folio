@@ -130,7 +130,7 @@ npm run build
 - Signing: the package is shaped for it, but no Apple identity is configured, so builds are unsigned and notarization is wired but not run. See Release.
 - The license check is a seam only; it never blocks.
 - The library shelf, dog-ears, the Previously recap, other agents, and payments are not built.
-- Plate status (accepted, reverted, folded) is kept in memory for the open book and is not saved. After a reload the plates come back from the press's diff without it.
+- Plate status (accepted, reverted, folded) is kept on this machine in localStorage, by session, and restored when the book is opened again. It is not stored by the press.
 - Approve-first is the permission toggle, not a separate editor.
 - Page curl is a 3D turn with a lifted corner, not a full cylindrical mesh.
 
