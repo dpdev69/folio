@@ -12,9 +12,33 @@ export function Chrome({ folio }: { folio: Folio }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const typeButton = useRef<HTMLButtonElement>(null);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     setTauri("__TAURI_INTERNALS__" in window);
   }, []);
+
+  // The menu closes like the settings card: Escape, or a press anywhere outside it.
+  const { menuOpen, setMenuOpen } = folio;
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || menuButton.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      menuButton.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointer, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen, setMenuOpen]);
   const chapter = folio.book?.chapters.find((item) => item.id === folio.pages[folio.nav.spread * 2]?.chapterId);
   const index = folio.book?.chapters.findIndex((item) => item.id === chapter?.id) ?? -1;
   const title =
@@ -56,7 +80,14 @@ export function Chrome({ folio }: { folio: Folio }) {
         >
           <IconContents />
         </button>
-        <button type="button" className="icon-btn" aria-label="Menu" onClick={() => folio.setMenuOpen(!folio.menuOpen)}>
+        <button
+          ref={menuButton}
+          type="button"
+          className="icon-btn"
+          aria-label="Menu"
+          aria-expanded={folio.menuOpen}
+          onClick={() => folio.setMenuOpen(!folio.menuOpen)}
+        >
           <IconMenu />
         </button>
       </div>
@@ -100,7 +131,7 @@ export function Chrome({ folio }: { folio: Folio }) {
         </button>
       </div>
       {folio.menuOpen ? (
-        <div className="menu" role="menu">
+        <div className="menu" role="menu" ref={menuRef}>
           <button type="button" onClick={() => folio.setNavDesk()}>
             Title page
           </button>
