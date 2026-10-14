@@ -257,18 +257,21 @@ export async function pendingFrames(client: EngineClient, sessionId: string): Pr
 /**
  * The `folio.diff` frame for a chapter's current turn: the diff from the
  * turn's user message on, or the whole session's when the press will not
- * scope it (a turn whose id it does not know yet).
+ * scope it (a turn whose id it does not know yet). The whole session's diff is
+ * marked `unscoped`, so its patches never become a plate's own.
  */
 export async function turnDiff(client: EngineClient, chapter: Chapter): Promise<EventFrame> {
   const turn = lastInk(chapter);
   let diff;
+  let unscoped = !turn;
   try {
     diff = await client.diff(chapter.id, turn);
   } catch (error) {
     if (!turn || !(error instanceof EngineError) || error.status !== 400) throw error;
     diff = await client.diff(chapter.id);
+    unscoped = true;
   }
-  return { type: "folio.diff", data: { sessionID: chapter.id, diff, turnMessageId: turn } };
+  return { type: "folio.diff", data: { sessionID: chapter.id, diff, turnMessageId: turn, ...(unscoped ? { unscoped } : {}) } };
 }
 
 /**

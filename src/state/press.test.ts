@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startReplay, type Replay } from "../../scripts/replay-press.mjs";
 import type { Book, Chapter, Plate } from "../book/model";
 import { EngineClient } from "../engine/client";
-import { CANNOT_REVERT, defaultModelChoice, loadBook, offeredModels, refreshBook, revertNote, revertPlate } from "./press";
+import { CANNOT_REVERT, defaultModelChoice, loadBook, offeredModels, refreshBook, revertNote, revertPlate, turnDiff } from "./press";
 
 const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
@@ -28,6 +28,26 @@ function plate(over: Partial<Plate> = {}): Plate {
 }
 
 const book = (chapters: Chapter[]): Book => ({ id: DIRECTORY, title: "repo", directory: DIRECTORY, sample: false, chapters });
+
+describe("turnDiff", () => {
+  const ink = (id: string) => ({ id, voice: "ink" as const, text: "Go." });
+
+  it("scopes the diff to the turn's user message", async () => {
+    const { replay, client } = await press();
+    const frame = await turnDiff(client, chapter({ blocks: [ink("msg_1378318cd0011en9zAGWcvx4bC")] }));
+    expect(frame.data).toMatchObject({ turnMessageId: "msg_1378318cd0011en9zAGWcvx4bC" });
+    expect((frame.data as { unscoped?: boolean }).unscoped).toBeUndefined();
+    expect(replay.requests.filter((r) => r.path.endsWith("/diff"))).toHaveLength(1);
+  });
+
+  it("marks the whole session's diff as unscoped when the press will not scope it", async () => {
+    const { client } = await press();
+    const refused = await turnDiff(client, chapter({ blocks: [ink("msg_not_a_user_message")] }));
+    expect(refused.data).toMatchObject({ unscoped: true });
+    const unnamed = await turnDiff(client, chapter({ blocks: [ink("local-1")] }));
+    expect(unnamed.data).toMatchObject({ unscoped: true });
+  });
+});
 
 describe("revertPlate", () => {
   const GREET = "export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n";

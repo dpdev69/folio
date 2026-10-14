@@ -94,7 +94,7 @@ function reduceChapter(chapter: Chapter, type: string, data: Data): Chapter {
     case "form.cancelled":
       return chapter.forms.some((f) => f.id === id) ? { ...chapter, forms: chapter.forms.filter((f) => f.id !== id) } : chapter;
     case "folio.diff":
-      return rewordPlates(applyDiff(chapter, data.diff, stringOf(data.turnMessageId) ?? lastInkId(chapter)));
+      return rewordPlates(applyDiff(chapter, data.diff, stringOf(data.turnMessageId) ?? lastInkId(chapter), data.unscoped === true));
     default:
       return chapter;
   }

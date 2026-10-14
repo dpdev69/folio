@@ -76,8 +76,13 @@ export function dropPlate(plates: Plate[], id: string): Plate[] {
  * whole session). A patch updates the latest plate for its file in that turn,
  * keeping its number, status and fold; a file with no plate in the turn gets a
  * `diff-<file>` plate of its own. Plates of earlier turns are left alone.
+ *
+ * The diff sets a plate's lines, never a patch the plate already has: a tool's
+ * patch covers that one edit, while the turn's patch covers every edit to the
+ * file, and Reject reverses `plate.patch`. A diff patch only fills a plate that
+ * has none, and an `unscoped` diff (the whole session's) fills none at all.
  */
-export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string | undefined): Chapter {
+export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string | undefined, unscoped = false): Chapter {
   if (!Array.isArray(raw)) return chapter;
   let plates = chapter.plates;
   for (const item of raw) {
@@ -97,7 +102,7 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
       title: existing?.title ?? basename(diff.file),
       caption: captionFor(diff.status, diff.file),
       lines: lines.length ? lines : existing!.lines,
-      patch: lines.length ? diff.patch : existing?.patch,
+      patch: existing?.patch ?? (lines.length && !unscoped ? diff.patch : undefined),
       additions: diff.additions ?? existing?.additions ?? count(lines, "add"),
       deletions: diff.deletions ?? existing?.deletions ?? count(lines, "del"),
       status: existing?.status ?? "open",

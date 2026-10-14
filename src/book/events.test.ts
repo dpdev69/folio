@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyEvent, appendPrompt, MODEL_GONE, renameBlock, type Frame } from "./events";
-import { parsePatch } from "./diff";
+import { parsePatch, reversePatch } from "./diff";
 import { quillKey } from "./quill";
 import type { Book, Chapter } from "./model";
 import { pushSse, unwrapEvent } from "../engine/sse";
@@ -225,6 +225,19 @@ describe("the session diff (folio.diff)", () => {
     ]);
     expect(chapter.footnotes.find((f) => f.id === "call-w2")?.text).toBe("Edited src/greet.ts, 2 lines added. See Plate III →");
     expect(chapter.footnotes.find((f) => f.id === "call-w1")?.text).toBe("Edited src/greet.ts, 1 line added. See Plate II →");
+  });
+
+  it("leaves each of two edits to one file in a turn its own patch, so Reject undoes only its own", () => {
+    const before = secondTurn(2);
+    const own = before.chapters[0].plates.map((p) => p.patch);
+    // Each edit added its line under `export {};`, so the turn's diff covers both.
+    const chapter = diffed(before, ["wave2", "wave1"]);
+    expect(chapter.plates.map((p) => p.patch)).toEqual(own);
+    const [, first, second] = chapter.plates;
+    expect(first.patch).toBe(patch(["wave1"]));
+    expect(second.patch).toBe(patch(["wave2"]));
+    // Reject on Plate III takes out wave2 and leaves Plate II's wave1 in the file.
+    expect(reversePatch("export {};\nwave2\nwave1\n", second.patch!)).toBe("export {};\nwave1\n");
   });
 
   it("opens a plate of its own when the current turn has none for the file", () => {
@@ -645,12 +658,36 @@ describe("footnote anchors", () => {
 });
 
 describe("plates keep their patch", () => {
-  it("takes the patch from the tool, then from the session diff", () => {
+  it("keeps the tool's patch once set; the session diff sets the lines only", () => {
     const pressed = play(shelf(), frames(captures.edit));
     const plate = only(pressed).plates[0];
     expect(plate.patch).toMatch(/^Index: src\/greet\.ts\n/);
     const diffed = only(applyEvent(pressed, { type: "folio.diff", data: { sessionID: pressed.chapters[0].id, diff: editDiff } }));
+    expect(diffed.plates[0].patch).toBe(plate.patch);
+    expect(diffed.plates[0].lines).toEqual(parsePatch(editDiff[0].patch));
+  });
+
+  it("gives a plate with no patch the session diff's patch", () => {
+    const pressed = play(shelf(), frames(captures.edit));
+    const sessionID = pressed.chapters[0].id;
+    const bare = { ...pressed, chapters: [{ ...pressed.chapters[0], plates: pressed.chapters[0].plates.map((p) => ({ ...p, patch: undefined })) }] };
+    const diffed = only(applyEvent(bare, { type: "folio.diff", data: { sessionID, diff: editDiff } }));
     expect(diffed.plates[0].patch).toBe(editDiff[0].patch);
+  });
+
+  it("takes no patch from a whole-session diff, so Reject refuses its plates", () => {
+    const pressed = play(shelf(), frames(captures.edit));
+    const sessionID = pressed.chapters[0].id;
+    const bare = { ...pressed, chapters: [{ ...pressed.chapters[0], plates: pressed.chapters[0].plates.map((p) => ({ ...p, patch: undefined })) }] };
+    const kept = only(applyEvent(bare, { type: "folio.diff", data: { sessionID, diff: editDiff, unscoped: true } }));
+    expect(kept.plates[0].patch).toBeUndefined();
+    expect(kept.plates[0].lines).toEqual(parsePatch(editDiff[0].patch));
+    // A file the turn has no plate for gets a diff plate, still without a patch.
+    const other = [{ ...editDiff[0], file: "README.md", patch: editDiff[0].patch.replaceAll("src/greet.ts", "README.md") }];
+    const opened = only(applyEvent(bare, { type: "folio.diff", data: { sessionID, diff: other, unscoped: true } }));
+    const plate = opened.plates.find((p) => p.id === "diff-README.md")!;
+    expect(plate.lines.length).toBeGreaterThan(0);
+    expect(plate.patch).toBeUndefined();
   });
 
   it("sets the session diff on the turn the frame names, not the latest one", () => {
@@ -663,7 +700,7 @@ describe("plates keep their patch", () => {
     });
     const chapter = only(applyEvent(next, { type: "folio.diff", data: { sessionID, diff: editDiff, turnMessageId: firstTurn } }));
     expect(chapter.plates).toHaveLength(1);
-    expect(chapter.plates[0]).toMatchObject({ turnMessageId: firstTurn, patch: editDiff[0].patch });
+    expect(chapter.plates[0]).toMatchObject({ turnMessageId: firstTurn, lines: parsePatch(editDiff[0].patch) });
   });
 });
 
