@@ -159,6 +159,18 @@ export async function openPress(host: PressHost, target?: AttachTarget): Promise
   };
 }
 
+/**
+ * Reach the press again after its stream keeps failing: the host starts a new
+ * one if its child has died (new port, new password), and a new client is
+ * checked against it.
+ */
+export async function reattachPress(host: PressHost, target?: AttachTarget): Promise<EngineClient> {
+  const attached = await host.attach(target);
+  const client = new EngineClient(attached.url, { password: attached.password, host });
+  await client.info();
+  return client;
+}
+
 /** A new chapter: a session bound to the folder, with Folio's writing style. */
 export async function openChapter(
   client: EngineClient,

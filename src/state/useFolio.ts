@@ -11,7 +11,7 @@ import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, initialNav, reduceNav, type Nav } from "./nav";
 import { DEFAULT_SCALE_INDEX, SCALES, inkFont, layoutScale, proseFont } from "../ui/scales";
 import { useSettings } from "./useSettings";
-import { FIRST_PAGE, FIRST_PAGE_ID, keyProviders, pressSummary, type PressPhase } from "../welcome/copy";
+import { keyProviders, pressSummary, type PressPhase } from "../welcome/copy";
 import {
   DECLINE_MESSAGE,
   isTauri,
@@ -20,11 +20,13 @@ import {
   openChapter,
   openPress,
   pressHost,
+  reattachPress,
   refreshBook,
   revertPlate,
   turnDiff,
   type AttachTarget,
 } from "./press";
+import { ensureFirstPage, mergeResync } from "./resync";
 
 export type EngineState = "off" | "connecting" | "ready" | "error";
 
@@ -63,6 +65,13 @@ export function useFolio() {
   const bookRef = useRef<Book | null>(null);
   bookRef.current = book;
   const seenErrors = useRef(new Map<string, string>());
+  // The stream and the press behind it: whether the stream is in an outage, the
+  // press being started again, the attach target to reach it with, and the
+  // frames that reached the page while a resync read the history.
+  const pausedRef = useRef(false);
+  const restartingRef = useRef(false);
+  const targetRef = useRef<AttachTarget | undefined>(undefined);
+  const resyncRef = useRef<{ frames: EventFrame[]; again: boolean; signal: AbortSignal } | null>(null);
   const { settings, dispatch: setSettings, theme, appearance } = useSettings();
   const { scaleIndex, lineSpacing, margins } = settings;
   const scale = useMemo(
@@ -261,26 +270,7 @@ export function useFolio() {
       const next = await loadBook(client, folder, { askBeforeWrite, model });
       // Errors already in the history are old news.
       seenErrors.current = new Map(next.chapters.flatMap((c) => (c.error ? [[c.id, c.error] as const] : [])));
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      // Many deltas arrive per frame; set them in type together, in order.
-      const events = coalesce<EventFrame>((batch) =>
-        setBook((current) => {
-          if (!current || current.sample) return current;
-          return batch.reduce((book, frame) => applyEvent(book, frame), current);
-        }),
-      );
-      ctrl.signal.addEventListener("abort", () => events.cancel());
-      client.subscribe((frame) => {
-        if (frame.type === "folio.stream-paused") {
-          setNotice("The event stream paused. Folio will listen again.");
-        } else if (frame.type === "folio.stream-resumed") {
-          setNotice(null);
-          void resync(client, ctrl.signal);
-        } else {
-          events.push(frame);
-        }
-      }, ctrl.signal);
+      listen(client);
       setBook(ensureFirstPage(next));
       setDrafts({});
       setEngineState("ready");
@@ -295,21 +285,91 @@ export function useFolio() {
     }
   }
 
+  /** Listen to the press's stream for the open book, in place of any earlier stream. */
+  function listen(client: EngineClient): AbortSignal {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    pausedRef.current = false;
+    // Many deltas arrive per frame; set them in type together, in order.
+    const events = coalesce<EventFrame>((batch) => {
+      // A resync reading the history applies these again to the chapters it brings back.
+      if (resyncRef.current?.signal === ctrl.signal) resyncRef.current.frames.push(...batch);
+      setBook((current) => {
+        if (!current || current.sample) return current;
+        return batch.reduce((book, frame) => applyEvent(book, frame), current);
+      });
+    });
+    ctrl.signal.addEventListener("abort", () => events.cancel());
+    client.subscribe((frame) => {
+      if (frame.type === "folio.stream-paused") {
+        pausedRef.current = true;
+        setNotice("The event stream paused. Folio will listen again.");
+      } else if (frame.type === "folio.stream-resumed") {
+        pausedRef.current = false;
+        setNotice(null);
+        void resync(client, ctrl.signal);
+      } else if (frame.type === "folio.stream-failing") {
+        void restartPress();
+      } else {
+        events.push(frame);
+      }
+    }, ctrl.signal);
+    return ctrl.signal;
+  }
+
   /** The stream has no replay; after an outage, set the chapters again from history. */
   async function resync(client: EngineClient, signal: AbortSignal) {
-    const snapshot = bookRef.current;
-    if (!snapshot || snapshot.sample) return;
+    const running = resyncRef.current;
+    if (running && !running.signal.aborted) {
+      running.again = true;
+      return;
+    }
+    const run = { frames: [] as EventFrame[], again: false, signal };
+    resyncRef.current = run;
     try {
+      const snapshot = bookRef.current;
+      if (!snapshot || snapshot.sample) return;
       const fresh = await refreshBook(client, snapshot);
       if (signal.aborted) return;
-      setBook((current) => {
-        if (!current || current.id !== fresh.id) return current;
-        const byId = new Map(fresh.chapters.map((chapter) => [chapter.id, chapter]));
-        return { ...current, chapters: current.chapters.map((chapter) => byId.get(chapter.id) ?? chapter) };
-      });
+      const frames = run.frames.slice();
+      setBook((current) => (current && !current.sample && current.id === fresh.id ? mergeResync(current, fresh, frames) : current));
     } catch {
       // The next outage or turn will try again.
+    } finally {
+      if (resyncRef.current === run) resyncRef.current = null;
+      if (run.again && !signal.aborted) void resync(client, signal);
     }
+  }
+
+  /**
+   * The stream keeps failing, or a call found nothing answering while it was
+   * paused: the press may have died. Reach it again (the host starts a new one,
+   * with a new port and password), listen with the new client, and resync.
+   * If that fails, the old stream goes on trying and asks again later.
+   */
+  async function restartPress() {
+    if (restartingRef.current) return;
+    restartingRef.current = true;
+    try {
+      const client = await reattachPress(pressHost(), targetRef.current);
+      client.onUnreachable = whenUnreachable;
+      clientRef.current = client;
+      const current = bookRef.current;
+      if (current && !current.sample) {
+        const signal = listen(client);
+        void resync(client, signal);
+      }
+      setNotice(null);
+    } catch {
+      setNotice("The press is not answering. Folio will keep trying.");
+    } finally {
+      restartingRef.current = false;
+    }
+  }
+
+  function whenUnreachable() {
+    if (pausedRef.current) void restartPress();
   }
 
   function updateChapter(id: string, edit: (chapter: Chapter) => Chapter) {
@@ -575,6 +635,8 @@ export function useFolio() {
         return;
       }
       const opened = await openPress(pressHost(), target);
+      targetRef.current = target;
+      if (opened.client) opened.client.onUnreachable = whenUnreachable;
       clientRef.current = opened.client;
       providersRef.current = opened.providers;
       setModels(opened.models);
@@ -795,20 +857,6 @@ export function useFolio() {
     chapterRoman,
     displayTitle,
     isUntitled,
-  };
-}
-
-function ensureFirstPage(book: Book): Book {
-  if (book.chapters.some((chapter) => chapter.blocks.some((block) => block.id !== FIRST_PAGE_ID && block.text.trim()))) return book;
-  const last = book.chapters[book.chapters.length - 1];
-  if (!last || last.blocks.some((block) => block.id === FIRST_PAGE_ID)) return book;
-  return {
-    ...book,
-    chapters: book.chapters.map((chapter) =>
-      chapter.id === last.id
-        ? { ...chapter, blocks: [{ id: FIRST_PAGE_ID, voice: "prose", text: FIRST_PAGE }, ...chapter.blocks] }
-        : chapter,
-    ),
   };
 }
 
