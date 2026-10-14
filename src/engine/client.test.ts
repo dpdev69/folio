@@ -120,6 +120,33 @@ describe("EngineClient against the replay press", () => {
     expect(frames[1].data?.message).toBeTruthy();
   });
 
+  it("says the stream is failing after every third reconnect that fails", async () => {
+    const live = await press();
+    const client = new EngineClient(live.url, { password: "pw", stream: { retryDelay: () => 5 } });
+    const frames = listen(client);
+    await until(() => frames.some((f) => f.type === "server.connected"));
+    await live.close();
+    await until(() => frames.filter((f) => f.type === "folio.stream-failing").length >= 2);
+    const failing = frames.filter((f) => f.type === "folio.stream-failing");
+    expect(failing.slice(0, 2).map((f) => f.data?.attempts)).toEqual([3, 6]);
+    expect(frames.filter((f) => f.type === "folio.stream-paused").length).toBe(1);
+    // The first failing frame comes after the pause and three failed reconnects.
+    expect(frames.findIndex((f) => f.type === "folio.stream-paused")).toBeLessThan(frames.indexOf(failing[0]));
+  });
+
+  it("tells its owner when a request finds nothing answering", async () => {
+    const onUnreachable = vi.fn();
+    const nowhere = new EngineClient("http://127.0.0.1:9", { password: "pw" });
+    nowhere.onUnreachable = onUnreachable;
+    await expect(nowhere.info()).rejects.toMatchObject({ status: 0 });
+    expect(onUnreachable).toHaveBeenCalledTimes(1);
+    const { url } = await press();
+    const there = new EngineClient(url, { password: "pw" });
+    there.onUnreachable = onUnreachable;
+    await expect(there.prompt("ses_busy", "hi")).rejects.toMatchObject({ status: 409 });
+    expect(onUnreachable).toHaveBeenCalledTimes(1);
+  });
+
   it("gives up on a stream that has gone silent and opens another", async () => {
     const live = await press({ heartbeatMs: 60_000 });
     const client = new EngineClient(live.url, { password: "pw", stream: { silenceMs: 80, retryDelay: () => 10 } });

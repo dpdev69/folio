@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { inside, readBookFile, writeBookFile } from "./host";
+import { inside, readBookFile, servePress, stopPress, writeBookFile } from "./host";
 
 describe("the write guard", () => {
   let base: string;
@@ -51,3 +51,59 @@ describe("the write guard", () => {
     expect(() => inside(book, "alias.txt")).not.toThrow();
   });
 });
+
+describe("the dev press", () => {
+  let dir: string;
+  const saved = { bin: process.env.FOLIO_OPENCODE_BIN, url: process.env.FOLIO_PRESS_URL };
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "folio-fake-press-"));
+    // A stand-in for `opencode serve --stdio`: it names its pid in the url and lives until stdin closes.
+    const fake = path.join(dir, "opencode");
+    writeFileSync(
+      fake,
+      [
+        "#!/usr/bin/env node",
+        'if (process.argv.includes("--version")) { console.log("2.0.28"); process.exit(0); }',
+        "console.log(JSON.stringify({ url: `http://127.0.0.1:1/?pid=${process.pid}` }));",
+        'process.stdin.resume(); process.stdin.on("end", () => process.exit(0));',
+      ].join("\n"),
+    );
+    chmodSync(fake, 0o755);
+    process.env.FOLIO_OPENCODE_BIN = fake;
+    delete process.env.FOLIO_PRESS_URL;
+  });
+
+  afterEach(() => {
+    stopPress();
+    if (saved.bin === undefined) delete process.env.FOLIO_OPENCODE_BIN;
+    else process.env.FOLIO_OPENCODE_BIN = saved.bin;
+    if (saved.url !== undefined) process.env.FOLIO_PRESS_URL = saved.url;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reuses a live press, and starts a new one with a new password once it has died", async () => {
+    const first = await servePress();
+    if (!first.ok) throw new Error(first.error);
+    const again = await servePress();
+    expect(again).toMatchObject({ ok: true, url: first.url, password: first.password });
+    const pid = Number(new URL(first.url).searchParams.get("pid"));
+    process.kill(pid, "SIGKILL");
+    const end = Date.now() + 3000;
+    while (isAlive(pid) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const fresh = await servePress();
+    if (!fresh.ok) throw new Error(fresh.error);
+    expect(fresh.url).not.toBe(first.url);
+    expect(fresh.password).not.toBe(first.password);
+  });
+});
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}

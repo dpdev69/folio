@@ -52,6 +52,8 @@ export type EngineOptions = {
     /** A stream that sends nothing, not even a heartbeat, for this long is dropped. */
     silenceMs?: number;
     retryDelay?: (attempt: number) => number;
+    /** `folio.stream-failing` is sent after every this many failed reconnects in a row (default 3). */
+    failingEvery?: number;
   };
 };
 
@@ -90,6 +92,8 @@ const MAX_PAGES = 50;
 export class EngineClient {
   private version?: string;
   private readonly auth: string;
+  /** Called when a request finds nothing answering (status 0), so the owner can start the press again. */
+  onUnreachable?: () => void;
 
   constructor(
     private readonly baseUrl: string,
@@ -272,7 +276,9 @@ export class EngineClient {
    * Listen to the global event stream until `signal` aborts. Frames arrive as
    * the server sent them, `{type, data, location?}`, unfiltered. A dropped or
    * silent stream is opened again with backoff; `folio.stream-paused` marks the
-   * start of an outage (once) and `folio.stream-resumed` its end.
+   * start of an outage (once) and `folio.stream-resumed` its end. After every
+   * third reconnect in a row that fails, `folio.stream-failing {attempts}` says
+   * the press may have stopped; the stream itself keeps trying.
    */
   subscribe(onFrame: (frame: EventFrame) => void, signal: AbortSignal): void {
     void this.pump(onFrame, signal);
@@ -281,6 +287,7 @@ export class EngineClient {
   private async pump(onFrame: (frame: EventFrame) => void, signal: AbortSignal): Promise<void> {
     const silenceMs = this.opts.stream?.silenceMs ?? 45_000;
     const retryDelay = this.opts.stream?.retryDelay ?? backoffDelay;
+    const failingEvery = this.opts.stream?.failingEvery ?? 3;
     let failures = 0;
     let paused = false;
     while (!signal.aborted) {
@@ -311,6 +318,9 @@ export class EngineClient {
         if (!paused) onFrame({ type: "folio.stream-paused", data: { message: errorText(error) } });
         paused = true;
         failures += 1;
+        // The first failure is the drop itself; the rest are reconnects that failed.
+        const attempts = failures - 1;
+        if (attempts > 0 && attempts % failingEvery === 0) onFrame({ type: "folio.stream-failing", data: { attempts } });
         await sleep(retryDelay(failures), signal);
       } finally {
         dog.stop();
@@ -364,6 +374,7 @@ export class EngineClient {
       });
     } catch (error) {
       const timedOut = error instanceof Error && error.name === "TimeoutError";
+      this.onUnreachable?.();
       throw new EngineError(0, timedOut ? "TimeoutError" : "NetworkError", "The press could not be reached.");
     }
     if (!response.ok) throw await failure(response, this.version);
