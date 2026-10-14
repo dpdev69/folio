@@ -56,8 +56,9 @@ describe("EngineClient against the replay press", () => {
     const sessions = await client.sessions(DIRECTORY);
     expect(sessions.map((s) => s.id)).toEqual([SESSION, "ses_second"]);
     const listed = requests.filter((r) => r.path === "/api/session");
-    expect(listed.map((r) => r.query.cursor)).toEqual([undefined, "page2"]);
+    expect(listed.length).toBe(2);
     expect(listed[0].query.directory).toBe(DIRECTORY);
+    expect(listed[1].query).toEqual({ cursor: expect.any(String), limit: "100" });
     const model = await client.defaultModel();
     expect(model).toMatchObject({ id: "cat-jam-free", providerID: "opencode" });
     expect((await client.providers()).map((p) => p.name)).toEqual(["OpenCode"]);

@@ -100,12 +100,14 @@ export async function startReplay({ port = 0, password = "replay", flaky = false
       return;
     }
     if (method === "GET" && path === "/api/session") {
-      // Two pages, one session each, to make a client follow the cursor.
-      const directory = url.searchParams.get("directory");
+      // Two pages, the first with one session, to make a client follow the cursor.
+      // As in 2.0.28, the cursor carries the first page's filters.
+      const cursor = url.searchParams.get("cursor");
+      const directory = cursor ? JSON.parse(Buffer.from(cursor, "base64url").toString()).directory : url.searchParams.get("directory");
       const list = sessions.filter((s) => !directory || s.location.directory === directory);
-      const page = url.searchParams.get("cursor") === "page2" ? 1 : 0;
-      const data = page === 0 ? list.slice(0, 1) : list.slice(1);
-      return send(res, 200, { data, cursor: { previous: null, next: page === 0 && list.length > 1 ? "page2" : null } });
+      const data = cursor ? list.slice(1) : list.slice(0, 1);
+      const next = !cursor && list.length > 1 ? Buffer.from(JSON.stringify({ directory })).toString("base64url") : null;
+      return send(res, 200, { data, cursor: { previous: null, next } });
     }
     if (method === "POST" && path === "/api/session") {
       const created = session(`ses_new${sessions.length}`, body?.title, Date.now(), body?.location?.directory ?? DIRECTORY);
@@ -114,7 +116,10 @@ export async function startReplay({ port = 0, password = "replay", flaky = false
     }
     if (method === "GET" && path === "/api/session/active") return send(res, 200, { data: {} });
     if ((match = /^\/api\/session\/([^/]+)\/message$/.exec(path)) && method === "GET") {
-      if (url.searchParams.get("order") !== "asc") return send(res, 400, { _tag: "InvalidRequestError", message: "order" });
+      // As in 2.0.28: the first page names the order, and a cursor carries it from then on.
+      const cursor = url.searchParams.get("cursor");
+      if (cursor && url.searchParams.has("order")) return send(res, 400, { _tag: "InvalidCursorError", message: "Cursor cannot be combined with order" });
+      if (!cursor && url.searchParams.get("order") !== "asc") return send(res, 400, { _tag: "InvalidRequestError", message: "order" });
       const list = match[1] === SESSION ? messages : [];
       // Pages of two; the cursor is the next index.
       const from = Number(url.searchParams.get("cursor") ?? 0);

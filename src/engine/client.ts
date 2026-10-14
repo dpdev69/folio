@@ -301,12 +301,17 @@ export class EngineClient {
     }
   }
 
-  /** Walk a cursor-paged list until it ends, `onPage` says stop, or the page cap. */
+  /**
+   * Walk a cursor-paged list until it ends, `onPage` says stop, or the page cap.
+   * The cursor carries the first page's order and filters; the press refuses
+   * them alongside it, so later pages send only the cursor and the limit.
+   */
   private async pages<T>(path: string, query: Query, onPage: (page: T[]) => boolean): Promise<void> {
     let cursor: string | undefined;
     const seen = new Set<string>();
     for (let i = 0; i < MAX_PAGES; i++) {
-      const result = await this.request<unknown>("GET", path, { query: { ...query, cursor } }, true);
+      const pageQuery = cursor ? { cursor, limit: query.limit } : query;
+      const result = await this.request<unknown>("GET", path, { query: pageQuery }, true);
       const record = result && typeof result === "object" ? (result as { data?: unknown; cursor?: { next?: unknown } }) : {};
       const page = Array.isArray(record.data) ? (record.data as T[]) : [];
       if (!onPage(page) || !page.length) return;

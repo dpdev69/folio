@@ -62,6 +62,7 @@ export function useFolio() {
   const providersRef = useRef<ProviderInfo[]>([]);
   const bookRef = useRef<Book | null>(null);
   bookRef.current = book;
+  const seenErrors = useRef(new Map<string, string>());
   const { settings, dispatch: setSettings, theme, appearance } = useSettings();
   const { scaleIndex, lineSpacing, margins } = settings;
   const scale = useMemo(
@@ -185,6 +186,19 @@ export function useFolio() {
     }
   }, [book]);
 
+  // chapter.error is not set on the page; say it once in the banner.
+  useEffect(() => {
+    if (!book || book.sample) return;
+    for (const chapter of book.chapters) {
+      if (!chapter.error) {
+        seenErrors.current.delete(chapter.id);
+      } else if (seenErrors.current.get(chapter.id) !== chapter.error) {
+        seenErrors.current.set(chapter.id, chapter.error);
+        setNotice(chapter.error.startsWith("The press") ? chapter.error : `The press stopped: ${chapter.error}`);
+      }
+    }
+  }, [book]);
+
   function stopStream() {
     if (streamRef.current != null) window.clearTimeout(streamRef.current);
     streamRef.current = null;
@@ -245,6 +259,8 @@ export function useFolio() {
     stopStream();
     try {
       const next = await loadBook(client, folder, { askBeforeWrite, model });
+      // Errors already in the history are old news.
+      seenErrors.current = new Map(next.chapters.flatMap((c) => (c.error ? [[c.id, c.error] as const] : [])));
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       // Many deltas arrive per frame; set them in type together, in order.
