@@ -50,7 +50,7 @@ jobs:
       - name: Bundle
         shell: bash
         # Tauri signs and notarizes on macOS only when these secrets exist.
-        # Without them the build is unsigned (ad-hoc), as before. Secrets that
+        # Without them the build is unsigned (linker-signed only), as before. Secrets that
         # are not set arrive as empty strings, so empty ones are unset first.
         run: |
           for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do

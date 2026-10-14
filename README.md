@@ -94,13 +94,13 @@ It runs `npm ci` if `node_modules` is missing, fetches the bundled press, then r
 - `macos/Folio.app`
 - `dmg/Folio_<version>_aarch64.dmg` (`_x64` for Intel)
 
-Set `FOLIO_DMG_PLAIN=1` to skip the Finder styling of the dmg window (the app and Applications icon positions). The styling drives Finder with AppleScript, so on a headless machine, or one where Finder automation is not allowed, the dmg step stops with `AppleEvent timed out (-1712)`. The plain dmg still holds `Folio.app` and the Applications link.
+Set `FOLIO_DMG_PLAIN=1` to skip the Finder styling of the dmg window, which is the icon positions and window size and nothing else. The styling drives Finder with AppleScript, so on a headless machine, or one where Finder automation is not allowed, the dmg step stops with `AppleEvent timed out (-1712)`. The flag sets `CI=true` for the `tauri build` command only. GitHub runners already set `CI`, so dmgs built in CI are unstyled. The plain dmg still holds `Folio.app` and the Applications link.
 
-At the end the script prints those paths and says whether the build was signed. When it was not, it prints the `codesign` and `xcrun notarytool` commands a release engineer would run.
+At the end the script checks that the app and dmg exist, prints their paths, and says whether the build was signed. When it was not, it says that setting the signing and notarization variables and running the script again is the supported path, and prints the manual sequence: sign the sidecar and the app, notarize the app from a `ditto` zip and staple it, then rebuild, sign, notarize, and staple the dmg.
 
 ### Signed-ready
 
-With no Apple identity configured the build is unsigned: Tauri applies an ad-hoc signature, the app runs on the machine that built it, and Gatekeeper warns elsewhere. Signed-ready means the package is already shaped for signing, so adding credentials is the only step left:
+With no Apple identity configured the build is unsigned (linker-signed only): the app runs on the machine that built it, and Gatekeeper warns elsewhere. Signed-ready means the package is already shaped for signing, so adding credentials is the only step left:
 
 - `src-tauri/Entitlements.plist` is wired into `bundle.macOS.entitlements`. It grants the hardened-runtime exceptions the Bun-built `opencode-cli` sidecar needs (`allow-jit`, `allow-unsigned-executable-memory`, `disable-library-validation`) and `network.client` for the local press.
 - `signingIdentity` is deliberately unset in `tauri.conf.json`. Tauri reads it from the environment.
