@@ -108,8 +108,9 @@ const RECENT = 8;
 type WrapCache = {
   entries: Map<string, WrappedLine[]>;
   /** The paragraphs wrapped afresh most lately, so a longer self of one can take its place. */
-  recent: { key: string; shape: string; text: string }[];
+  recent: Recent[];
 };
+type Recent = { key: string; shape: string; text: string; italics: ItalicRange[]; marks: Mark[] };
 const wrapCache = new WeakMap<Measure, WrapCache>();
 
 /**
@@ -135,17 +136,34 @@ export function wrapParagraphCached(opts: WrapOptions): WrappedLine[] {
     entries.delete(key);
   } else {
     lines = wrapParagraph(opts);
+    const fresh: Recent = { key, shape, text: opts.text, italics: opts.italics ?? [], marks: opts.marks ?? [] };
     cache.recent = cache.recent.filter((prior) => {
-      const outgrown = prior.shape === shape && opts.text.startsWith(prior.text);
+      const outgrown = grewFrom(prior, fresh);
       if (outgrown) entries.delete(prior.key);
       return !outgrown;
     });
-    cache.recent.push({ key, shape, text: opts.text });
+    cache.recent.push(fresh);
     if (cache.recent.length > RECENT) cache.recent.shift();
     if (entries.size >= CACHE_LIMIT) entries.delete(entries.keys().next().value!);
   }
   entries.set(key, lines);
   return lines.map(copyLine);
+}
+
+/**
+ * Whether `next` is a longer self of `prior`: the same shape, its text a
+ * prefix, every mark of `prior` still set, and every italic run of `prior`
+ * starting where it did (a run still open may have grown). Two paragraphs with
+ * the same words but other marks or italics are two paragraphs.
+ */
+function grewFrom(prior: Recent, next: Recent): boolean {
+  if (prior.shape !== next.shape || !next.text.startsWith(prior.text)) return false;
+  const marked = prior.marks.every((m) =>
+    next.marks.some((o) => o.offset === m.offset && o.n === m.n && o.plateId === m.plateId),
+  );
+  const longer = next.text.length > prior.text.length;
+  const italic = prior.italics.every(([a, b]) => next.italics.some(([c, d]) => c === a && (d === b || (longer && d > b))));
+  return marked && italic;
 }
 
 /** How many paragraphs the cache holds for this measure (for tests). */

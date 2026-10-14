@@ -1,5 +1,5 @@
 import { parsePatch, plateLines, PLATE_LINES } from "./diff";
-import type { Chapter, Plate, PlateLine, ToolCall } from "./model";
+import { toRoman, type Chapter, type Plate, type PlateLine, type ToolCall } from "./model";
 import { firstString, recordOf } from "./values";
 
 /** A changed file as opencode 2.0 reports it, in tool metadata and in the session diff. */
@@ -41,13 +41,9 @@ export function toolPlate(
     additions = existing.additions;
     deletions = existing.deletions;
   } else {
-    const before = firstString(call.input, ["oldString", "old_string"]) ?? "";
-    const after = firstString(call.input, ["newString", "new_string", "content"]) ?? "";
-    if (!before && !after) return { plates, plate: existing };
-    const full = plateLines(before, after, { context: 1, maxLines: Infinity });
-    lines = plateLines(before, after, { context: 1, maxLines: PLATE_LINES });
-    additions = count(full, "add");
-    deletions = count(full, "del");
+    const own = stringsLines(call);
+    if (!own) return { plates, plate: existing };
+    ({ lines, additions, deletions } = own);
   }
   if (!lines.length) return { plates, plate: existing };
   const file = entry?.file ?? path ?? "the file";
@@ -99,9 +95,13 @@ export function dropPlate(plates: Plate[], id: string): Plate[] {
  * patch is neither one's, so Reject refuses), and an `unscoped` diff (the
  * whole session's) fills none at all.
  *
- * With two or more plates for a file in the turn, a plate that holds its own
- * patch also keeps its own lines and counts: the turn's patch would show A+B
- * on a plate whose Reject undoes only B.
+ * With two or more plates for a file in the turn, no plate takes the turn's
+ * lines: one that holds its own patch keeps its own lines and counts (the
+ * turn's patch would show A+B on a plate whose Reject undoes only B), and one
+ * without shows its edit's own strings, or a caption naming the plate to see.
+ *
+ * A plate the diff itself made (`diff-<file>@<turn>`) takes each later scoped
+ * diff's patch and lines while it is open; once answered, its patch is kept.
  */
 export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string | undefined, unscoped = false): Chapter {
   if (!Array.isArray(raw)) return chapter;
@@ -115,8 +115,14 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
     // The turn's patch covers every edit to the file in the turn; it is a plate's own only if that plate is the only one.
     const owns = !unscoped && same.length <= 1;
     if (!existing && !lines.length) continue;
-    if (existing?.patch && same.length > 1) continue;
+    if (same.length > 1) {
+      // Each plate shows its own change; one with no patch of its own never shows the turn's.
+      plates = plates.map((p) => (same.includes(p) && !p.patch ? partOfLarger(p, same, chapter) : p));
+      continue;
+    }
     const id = existing?.id ?? diffPlateId(diff.file, turnMessageId);
+    // A plate the diff made follows the diff while it is open: a later diff for the turn covers more.
+    const refresh = owns && existing?.id === diffPlateId(diff.file, turnMessageId) && existing.status === "open" && lines.length > 0;
     const plate: Plate = {
       id,
       n: existing?.n ?? plates.length + 1,
@@ -126,9 +132,9 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
       title: existing?.title ?? basename(diff.file),
       caption: captionFor(diff.status, diff.file),
       lines: lines.length ? lines : existing!.lines,
-      patch: existing?.patch ?? (lines.length && owns ? diff.patch : undefined),
-      additions: diff.additions ?? existing?.additions ?? count(lines, "add"),
-      deletions: diff.deletions ?? existing?.deletions ?? count(lines, "del"),
+      patch: refresh ? diff.patch : (existing?.patch ?? (lines.length && owns ? diff.patch : undefined)),
+      additions: diff.additions ?? (refresh ? undefined : existing?.additions) ?? count(lines, "add"),
+      deletions: diff.deletions ?? (refresh ? undefined : existing?.deletions) ?? count(lines, "del"),
       ...changeOf(diff.status ?? existing?.change),
       status: existing?.status ?? "open",
       folded: existing?.folded ?? false,
@@ -136,6 +142,35 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
     plates = existing ? plates.map((p) => (p.id === existing.id ? plate : p)) : [...plates, plate];
   }
   return { ...chapter, plates, diffStale: false };
+}
+
+/**
+ * A plate with no patch of its own among two or more for one file in a turn:
+ * its lines come from its edit's own strings, or, with none, its caption says
+ * where the change can be seen.
+ */
+function partOfLarger(plate: Plate, same: Plate[], chapter: Chapter): Plate {
+  const callId = plate.id.startsWith("plate-") ? plate.id.slice("plate-".length) : undefined;
+  const call = callId ? chapter.calls?.[callId] : undefined;
+  const own = call ? stringsLines(call) : undefined;
+  if (own) return { ...plate, ...own };
+  const others = same.filter((p) => p.id !== plate.id);
+  const see = [...others].reverse().find((p) => p.patch) ?? others[others.length - 1];
+  const caption = see
+    ? `The change is part of a larger edit to ${plate.file}; see Plate ${toRoman(see.n)}.`
+    : `The change is part of a larger edit to ${plate.file}.`;
+  return { ...plate, lines: [], additions: 0, deletions: 0, caption };
+}
+
+/** The lines and counts of an edit from its own strings, before or without a patch. */
+function stringsLines(call: ToolCall): { lines: PlateLine[]; additions: number; deletions: number } | undefined {
+  const before = firstString(call.input, ["oldString", "old_string"]) ?? "";
+  const after = firstString(call.input, ["newString", "new_string", "content"]) ?? "";
+  if (!before && !after) return undefined;
+  const full = plateLines(before, after, { context: 1, maxLines: Infinity });
+  const lines = plateLines(before, after, { context: 1, maxLines: PLATE_LINES });
+  if (!lines.length) return undefined;
+  return { lines, additions: count(full, "add"), deletions: count(full, "del") };
 }
 
 /** The id of a plate set from the session diff: the same for a file's turn on every read. */

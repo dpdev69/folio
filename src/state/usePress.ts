@@ -12,7 +12,7 @@ import {
   saveChosenModel,
   type AttachTarget,
 } from "./press";
-import { afterRestart, openGate, restartWait } from "./restart";
+import { afterRestart, generations, openGate, restartWait, steadyGate } from "./restart";
 
 export type EngineState = "off" | "connecting" | "ready" | "error";
 
@@ -48,7 +48,12 @@ export function usePress(deps: PressDeps) {
   const providersRef = useRef<ProviderInfo[]>([]);
   // The attach target to reach the press with, whether it is being started again, and when it may be next.
   const targetRef = useRef<AttachTarget | undefined>(undefined);
-  const restartingRef = useRef(false);
+  // The press generation a restart is in flight for, if any.
+  const restartingRef = useRef<number | null>(null);
+  // Moves on each time preparePress sets out for a press; work for an earlier one is let go when it lands.
+  const [gens] = useState(generations);
+  // The generation preparePress is still opening; no restart goes to the press being left meanwhile.
+  const preparingRef = useRef<number | null>(null);
   const gateRef = useRef(openGate());
   const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -62,7 +67,7 @@ export function usePress(deps: PressDeps) {
 
   /** The stream has held: the next restart, if one is needed, may go at once. */
   function steady() {
-    gateRef.current = openGate();
+    gateRef.current = steadyGate(gateRef.current, Date.now());
     clearRestartTimer();
   }
 
@@ -74,6 +79,8 @@ export function usePress(deps: PressDeps) {
 
   /** Find the press, start or attach to it, and say on the title page what it will write with. */
   async function preparePress(target?: AttachTarget) {
+    const generation = gens.next();
+    preparingRef.current = generation;
     // The open book's stream belongs to the press being left.
     depsRef.current.onDetach();
     clearRestartTimer();
@@ -81,11 +88,14 @@ export function usePress(deps: PressDeps) {
     setPress({ phase: "checking" });
     try {
       const license = await uncheckedLicense.check();
+      if (!gens.isCurrent(generation)) return;
       if (licenseBlocks(license)) {
         setPress({ phase: "error", message: "This copy of Folio is not licensed." });
         return;
       }
       const opened = await openPress(pressHost(), target, loadChosenModel());
+      // A later preparePress has set out for another press: this one is let go.
+      if (!gens.isCurrent(generation)) return;
       targetRef.current = target;
       if (opened.client) adopt(opened.client);
       else clientRef.current = null;
@@ -98,9 +108,12 @@ export function usePress(deps: PressDeps) {
       setPress(opened.phase);
       if (opened.client) depsRef.current.onAttached(opened.client);
     } catch (error) {
+      if (!gens.isCurrent(generation)) return;
       clientRef.current = null;
       setEngineState("error");
       setPress({ phase: "error", message: messageOf(error, "The press could not be reached.") });
+    } finally {
+      if (preparingRef.current === generation) preparingRef.current = null;
     }
   }
 
@@ -126,7 +139,8 @@ export function usePress(deps: PressDeps) {
    * on trying and asks again later.
    */
   async function restartPress() {
-    if (restartingRef.current) return;
+    const generation = gens.current();
+    if (restartingRef.current === generation || preparingRef.current === generation) return;
     const wait = restartWait(gateRef.current, Date.now());
     if (wait > 0) {
       if (restartTimer.current == null) {
@@ -137,17 +151,19 @@ export function usePress(deps: PressDeps) {
       }
       return;
     }
-    restartingRef.current = true;
+    restartingRef.current = generation;
     gateRef.current = afterRestart(gateRef.current, Date.now());
     try {
       const client = await reattachPress(pressHost(), targetRef.current);
+      // preparePress switched presses while this restart was out: its client belongs to the press left behind.
+      if (!gens.isCurrent(generation)) return;
       adopt(client);
       depsRef.current.onAttached(client);
       depsRef.current.setNotice(null);
     } catch {
-      depsRef.current.setNotice("The press is not answering. Folio will keep trying.");
+      if (gens.isCurrent(generation)) depsRef.current.setNotice("The press is not answering. Folio will keep trying.");
     } finally {
-      restartingRef.current = false;
+      if (restartingRef.current === generation) restartingRef.current = null;
     }
   }
 

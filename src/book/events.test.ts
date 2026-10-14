@@ -277,6 +277,60 @@ describe("the session diff (folio.diff)", () => {
     expect(applyDiff(one, diff, "msg_u1").plates[0].patch).toBe(diff[0].patch);
   });
 
+  it("shows a patchless plate among two for one file its own strings, never the turn's lines", () => {
+    const base = book().chapters[0];
+    const plate = (id: string, n: number, own?: string) => ({
+      id,
+      n,
+      turnMessageId: "msg_u1",
+      file: "src/greet.ts",
+      title: "greet.ts",
+      caption: "",
+      lines: parsePatch(patch(["wave1", "wave2"])),
+      patch: own,
+      additions: 2,
+      deletions: 0,
+      status: "open" as const,
+      folded: false,
+    });
+    const calls = {
+      a: { id: "a", name: "edit", input: { path: "src/greet.ts", oldString: "x", newString: "x\nwave1" } },
+      b: { id: "b", name: "edit", input: { path: "src/greet.ts" } },
+    };
+    const chapter = { ...base, calls, plates: [plate("plate-a", 1), plate("plate-b", 2), plate("plate-c", 3, patch(["wave2"]))] };
+    const diff = [{ file: "src/greet.ts", patch: patch(["wave1", "wave2"]), status: "modified", additions: 2, deletions: 0 }];
+    const [a, b, c] = applyDiff(chapter as Chapter, diff, "msg_u1").plates;
+    // Plate I has strings of its own: they set its lines and counts.
+    expect(a.lines.map((l) => [l.kind, l.text])).toEqual([
+      ["context", "x"],
+      ["add", "wave1"],
+    ]);
+    expect([a.additions, a.deletions, a.patch]).toEqual([1, 0, undefined]);
+    // Plate II has none: it says where its change can be seen, and shows no lines that are not its own.
+    expect(b).toMatchObject({ lines: [], additions: 0, deletions: 0, patch: undefined });
+    expect(b.caption).toBe("The change is part of a larger edit to src/greet.ts; see Plate III.");
+    // Plate III keeps its own patch and lines.
+    expect(c).toEqual(chapter.plates[2]);
+  });
+
+  it("lets a later diff refresh a diff plate's patch while it is open, and never once it is answered", () => {
+    const bare = book().chapters[0];
+    const first = [{ file: "src/greet.ts", patch: patch(["wave1"]), status: "modified" }];
+    const later = [{ file: "src/greet.ts", patch: patch(["wave1", "wave2"]), status: "modified" }];
+    const opened = applyDiff(bare, first, "msg_u1");
+    expect(opened.plates[0]).toMatchObject({ id: "diff-src/greet.ts@msg_u1", patch: first[0].patch });
+    const grown = applyDiff(opened, later, "msg_u1").plates[0];
+    expect(grown.patch).toBe(later[0].patch);
+    expect(grown.lines).toEqual(parsePatch(later[0].patch));
+    expect(grown.additions).toBe(2);
+    for (const status of ["accepted", "reverted", "reverting"] as const) {
+      const answered = { ...opened, plates: opened.plates.map((p) => ({ ...p, status })) };
+      expect(applyDiff(answered, later, "msg_u1").plates[0].patch).toBe(first[0].patch);
+    }
+    // An unscoped diff (the whole session's) refreshes nothing.
+    expect(applyDiff(opened, later, "msg_u1", true).plates[0].patch).toBe(first[0].patch);
+  });
+
   it("names a diff plate by its file alone only when no turn is known", () => {
     const bare = book().chapters[0];
     const diff = [{ file: "src/greet.ts", patch: patch(["wave"]), status: "modified" }];
@@ -539,6 +593,22 @@ describe("events", () => {
     expect(renamed.plates[0].turnMessageId).toBe("msg_u1");
     expect(renamed.footnotes[0].blockId).toBe("msg_u1");
     expect(renameBlock(renamed, "local-1", "msg_u1")).toBe(renamed);
+  });
+
+  it("names a path the press asks about from the book's root, and leaves outside paths and commands as asked", () => {
+    let next = applyEvent(book(), ev("permission.asked", { id: "per_1", action: "edit", resources: ["/repos/api-server/src/greet.ts"] }));
+    next = applyEvent(next, ev("permission.asked", { id: "per_2", action: "read", resources: ["/etc/hosts"] }));
+    next = applyEvent(next, ev("permission.asked", { id: "per_3", action: "shell", resources: ["/repos/api-server/run.sh"] }));
+    next = applyEvent(
+      next,
+      ev("permission.asked", { id: "per_4", action: "edit", resources: [], metadata: { files: [{ file: "/repos/api-server/a.ts" }] } }),
+    );
+    expect(next.chapters[0].asks.map((a) => a.title)).toEqual([
+      "May I edit src/greet.ts?",
+      "May I read /etc/hosts?",
+      "May I run /repos/api-server/run.sh?",
+      "May I edit a.ts?",
+    ]);
   });
 
   it("asks in plain words for shell and wildcard permissions", () => {

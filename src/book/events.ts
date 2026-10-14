@@ -14,7 +14,7 @@ import { NOTE_PREFIX, parseNote } from "./notes";
 import { footnoteSentence, isEdit, type ToolLike } from "./tools";
 import { numberOf, recordOf, stringOf, type Data } from "./values";
 import { shownProse, stripThink } from "./think";
-import { samePath } from "./paths";
+import { insideRoot, samePath } from "./paths";
 
 /**
  * One event frame from opencode 2.0, `{id, type, data, location?}`, as it
@@ -439,7 +439,9 @@ function addAsk(chapter: Chapter, data: Data, directory?: string): Chapter {
   const permission = stringOf(data.action) ?? "*";
   const patterns = Array.isArray(data.resources) ? data.resources.filter((r): r is string => typeof r === "string") : [];
   const files = filesOf(data.metadata);
-  const target = patterns.filter((p) => p !== "*").join(", ") || files[0]?.file || "this";
+  // A path inside the book is named from its root; a command, or a path outside the book, is named as asked.
+  const named = (path: string) => (permission === "shell" || permission === "bash" ? path : askPath(path, directory));
+  const target = patterns.filter((p) => p !== "*").map(named).join(", ") || (files[0]?.file && named(files[0].file)) || "this";
   const source = recordOf(data.source);
   const callId = stringOf(source?.type) === "tool" ? stringOf(source?.id) : undefined;
   const ask: PermissionAsk = { id, permission, patterns, title: `May I ${verb(permission)} ${target}?`, patch: files[0]?.patch };
@@ -452,6 +454,13 @@ function addAsk(chapter: Chapter, data: Data, directory?: string): Chapter {
   const call = callId ? chapter.calls?.[callId] : undefined;
   if (!callId || !call || !isEdit(call.name) || !files.some((f) => f.patch)) return next;
   return placeTool(next, callId, { status: "running" }, files, directory);
+}
+
+/** A path the press asks about, from the book's root when it lies inside the book, else as given. */
+function askPath(path: string, directory: string | undefined): string {
+  if (!directory || !/^([A-Za-z]:)?[\\/]/.test(path)) return path;
+  if (samePath(path, directory)) return "the book's folder";
+  return insideRoot(path, directory) ?? path;
 }
 
 function verb(action: string): string {
