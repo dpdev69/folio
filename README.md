@@ -74,7 +74,7 @@ npm run fetch-press -- --dest /some/folder
 - `--dest <dir>` writes the sidecar into `<dir>` instead of `src-tauri/binaries`. The file name is the same.
 - `--binary <path>` copies a binary you already have. On macOS the script also reuses `/Applications/OpenCode.app` when it reports the pinned version, which saves the download (the archive is about 85 MB; the unpacked binary is about 186 MB). Pass `--download` to skip that and fetch from the network.
 - Otherwise it downloads the release archive from `opencode.ai/files/bin/<version>/`, then from the GitHub release if that fails, verifies it, unpacks it, and checks `--version`. A target that cannot run on this machine is downloaded without the version check.
-- Verification: `scripts/opencode-checksums.json` pins SHA-256 digests by version and then by archive name. A mismatch stops the script and nothing is installed. An absent pin only prints a warning along with the digest it computed, so the file can be extended. Upstream publishes no checksum file for the release, so the pin was computed from the archive itself; at present only `opencode-darwin-arm64.zip` for 2.0.28 is pinned. Pin the other archives, and every new version, before a public release.
+- Verification: `scripts/opencode-checksums.json` pins SHA-256 digests by version and then by archive name. A mismatch stops the script and nothing is installed. An absent pin only prints a warning along with the digest it computed, so the file can be extended. Upstream publishes no checksum file for the release, so each pin was computed from the archive itself, downloaded once from `opencode.ai`; all six 2.0.28 archives are pinned. Pin every new version the same way before it ships.
 
 ## Book
 

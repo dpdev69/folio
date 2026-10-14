@@ -1,5 +1,10 @@
 {
   "2.0.28": {
-    "opencode-darwin-arm64.zip": "0fbb2c8778f7ec45e92cd2f0c90fca47e0255ef501091298dd85d1f93a1a04ef"
+    "opencode-darwin-arm64.zip": "0fbb2c8778f7ec45e92cd2f0c90fca47e0255ef501091298dd85d1f93a1a04ef",
+    "opencode-darwin-x64.zip": "de7013c121d14e01cba40ef48208f28cb25359c300b054656008bf647b2652db",
+    "opencode-linux-arm64.tar.gz": "58fd41544e570ceb9bdb2fa4b445ce66f05538490f6b9ad27d23dcdfe4689670",
+    "opencode-linux-x64.tar.gz": "15cc878cfc7462fe477238538df27ae3fbd03c1ea7631615cacf0977f5b629c6",
+    "opencode-windows-arm64.zip": "4ee22d846d918da4fb134054f70dc030f0c8146c2fe1c96361822e5cfb632791",
+    "opencode-windows-x64.zip": "e98cbf73894ab7d13e8772aa021456b34468328302101e218a26fdaf1b402081"
   }
 }
