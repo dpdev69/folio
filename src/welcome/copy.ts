@@ -41,8 +41,24 @@ export function pressSummary(
 ): string {
   const press = `opencode ${version}`.trim();
   if (!model) return press;
-  const provider = model.providerID === "opencode" ? "OpenCode Zen" : providers.find((p) => p.id === model.providerID)?.name || model.providerID;
-  return `${press} · ${provider}, ${shortModel(model.id)}`;
+  return `${press} · ${providerLabel(model.providerID, providers)}, ${shortModel(model.id)}`;
+}
+
+/** A provider as the reader knows it; the free `opencode` provider is OpenCode Zen. */
+export function providerLabel(id: string, providers: { id: string; name?: string }[]): string {
+  return id === "opencode" ? "OpenCode Zen" : providers.find((p) => p.id === id)?.name || id;
+}
+
+/** The menu's model list: one group per provider, the free provider first, models in the press's order. */
+export function modelGroups<M extends { providerID: string; id: string; name?: string }>(
+  models: M[],
+  providers: { id: string; name?: string }[],
+): { id: string; label: string; models: M[] }[] {
+  const groups = new Map<string, M[]>();
+  for (const model of models) groups.set(model.providerID, [...(groups.get(model.providerID) ?? []), model]);
+  return [...groups.entries()]
+    .sort(([a], [b]) => Number(b === "opencode") - Number(a === "opencode"))
+    .map(([id, list]) => ({ id, label: providerLabel(id, providers), models: list }));
 }
 
 function shortModel(model: string): string {
@@ -55,6 +71,6 @@ export type PressPhase =
   | { phase: "missing"; detail?: string }
   | { phase: "installing" }
   /** `providers` is set while the reader has the key form open. */
-  | { phase: "ready"; version: string; summary: string; providers?: KeyProvider[] }
+  | { phase: "ready"; version: string; summary: string; providers?: KeyProvider[]; note?: string }
   | { phase: "error"; message: string }
   | { phase: "needs-password"; detail?: string };

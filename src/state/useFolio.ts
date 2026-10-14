@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyEvent, appendPrompt, renameBlock } from "../book/events";
+import { applyEvent, appendPrompt, MODEL_GONE, renameBlock } from "../book/events";
 import { paginateBook, type LaidPage } from "../book/paginate";
 import { chapterRoman, displayTitle, isUntitled, type Book, type Chapter, type Plate } from "../book/model";
 import { SAMPLE_BREAKS, SAMPLE_DRAFT, sampleBook, sampleNoteReply, sampleReply } from "../book/sample";
@@ -18,6 +18,7 @@ import {
   isTauri,
   loadBook,
   messageOf,
+  offeredModels,
   openChapter,
   openPress,
   pressHost,
@@ -54,6 +55,8 @@ export function useFolio() {
   const [pressUrlDraft, setPressUrlDraft] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [model, setModel] = useState<ModelRef | null>(null);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [modelsOpen, setModelsOpen] = useState(false);
   const [showPath, setShowPath] = useState(false);
   const [reduced, setReduced] = useState(false);
   const [fontsReady, setFontsReady] = useState(false);
@@ -196,6 +199,11 @@ export function useFolio() {
     }
   }, [book]);
 
+  // The model list lives in the menu; it closes with it.
+  useEffect(() => {
+    if (!menuOpen) setModelsOpen(false);
+  }, [menuOpen]);
+
   // chapter.error is not set on the page; say it once in the banner.
   useEffect(() => {
     if (!book || book.sample) return;
@@ -204,7 +212,8 @@ export function useFolio() {
         seenErrors.current.delete(chapter.id);
       } else if (seenErrors.current.get(chapter.id) !== chapter.error) {
         seenErrors.current.set(chapter.id, chapter.error);
-        setNotice(chapter.error.startsWith("The press") ? chapter.error : `The press stopped: ${chapter.error}`);
+        const plain = chapter.error === MODEL_GONE || chapter.error.startsWith("The press");
+        setNotice(plain ? chapter.error : `The press stopped: ${chapter.error}`);
       }
     }
   }, [book]);
@@ -593,8 +602,11 @@ export function useFolio() {
   async function chooseModel(choice: ModelRef) {
     setModel(choice);
     setMenuOpen(false);
+    if (notice === MODEL_GONE) setNotice(null);
     setPress((current) =>
-      current.phase === "ready" ? { ...current, summary: pressSummary(current.version, providersRef.current, choice) } : current,
+      current.phase === "ready"
+        ? { ...current, summary: pressSummary(current.version, providersRef.current, choice), note: undefined }
+        : current,
     );
     const chapter = chapterForSpread(nav.spread);
     if (!chapter || !book || book.sample) return;
@@ -640,6 +652,7 @@ export function useFolio() {
       if (opened.client) opened.client.onUnreachable = whenUnreachable;
       clientRef.current = opened.client;
       providersRef.current = opened.providers;
+      setProviders(opened.providers);
       setModels(opened.models);
       setModel(opened.model);
       setEngineState(opened.client ? "ready" : "off");
@@ -680,7 +693,8 @@ export function useFolio() {
         client.defaultModel().catch(() => null),
       ]);
       providersRef.current = providers;
-      setModels(list);
+      setProviders(providers);
+      setModels(offeredModels(list));
       const chosen = model ?? (fallback ? { providerID: fallback.providerID, id: fallback.id } : null);
       setPress((current) =>
         current.phase === "ready"
@@ -761,6 +775,8 @@ export function useFolio() {
     engineState,
     engineLabel,
     notice,
+    /** A notice the reader can act on: a gone model opens the model list. */
+    noticeAction: notice === MODEL_GONE ? ("choose-model" as const) : null,
     dismissNotice: () => setNotice(null),
     menuOpen,
     setMenuOpen,
@@ -782,12 +798,19 @@ export function useFolio() {
     preparePress: () => void preparePress(),
     models,
     model,
+    modelLabel: model ? (models.find((m) => m.providerID === model.providerID && m.id === model.id)?.name ?? model.id) : null,
+    providers,
+    modelsOpen,
+    setModelsOpen,
+    openModels: () => {
+      setMenuOpen(true);
+      setModelsOpen(true);
+    },
     chooseModel: (choice: ModelRef) => void chooseModel(choice),
     installPress,
     saveProviderKey,
     showProviderForm,
-    hideProviderForm: () =>
-      setPress((current) => (current.phase === "ready" ? { phase: "ready", version: current.version, summary: current.summary } : current)),
+    hideProviderForm: () => setPress((current) => (current.phase === "ready" ? { ...current, providers: undefined } : current)),
     press,
     providerId,
     setProviderId,

@@ -143,19 +143,42 @@ export async function openPress(host: PressHost, target?: AttachTarget): Promise
     }
     throw error;
   }
-  const [model, providers, models] = await Promise.all([
+  const [model, providers, listed] = await Promise.all([
     client.defaultModel().catch(() => null),
     client.providers().catch(() => []),
     client.models().catch(() => []),
   ]);
-  const ref = model ? { providerID: model.providerID, id: model.id } : null;
+  const models = offeredModels(listed);
+  const choice = defaultModelChoice(model ? { providerID: model.providerID, id: model.id } : null, models);
   return {
     client,
     version,
     models,
     providers,
-    model: ref,
-    phase: { phase: "ready", version, summary: pressSummary(version, providers, ref) },
+    model: choice.model,
+    phase: { phase: "ready", version, summary: pressSummary(version, providers, choice.model), note: choice.note },
+  };
+}
+
+/** The models the press will still run: active and enabled, when it says. */
+export function offeredModels<M extends ModelInfo>(models: M[]): M[] {
+  return models.filter((model) => {
+    const { status, enabled } = model as { status?: unknown; enabled?: unknown };
+    return (status === undefined || status === "active") && enabled !== false;
+  });
+}
+
+/**
+ * The press's default model, unless the press no longer offers it: then the
+ * first free (`opencode`) model, with a sentence for the title page.
+ */
+export function defaultModelChoice(model: ModelRef | null, offered: ModelInfo[]): { model: ModelRef | null; note?: string } {
+  if (!model || !offered.length || offered.some((m) => m.providerID === model.providerID && m.id === model.id)) return { model };
+  const free = offered.find((m) => m.providerID === "opencode");
+  if (!free) return { model };
+  return {
+    model: { providerID: free.providerID, id: free.id },
+    note: `The press's default model, ${model.id}, is no longer offered, so Folio chose ${free.name ?? free.id}.`,
   };
 }
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { displayTitle, toRoman } from "../book/model";
 import { IconBook, IconContents, IconMenu, IconRibbon, IconSearch, IconType } from "./icons";
 import { SettingsPopover } from "./Settings";
+import { modelGroups } from "../welcome/copy";
 import type { useFolio } from "../state/useFolio";
 
 type Folio = ReturnType<typeof useFolio>;
@@ -122,23 +123,37 @@ export function Chrome({ folio }: { folio: Folio }) {
             A provider key…
           </button>
           {folio.models.length ? (
-            <label className="menu-model">
-              <span>Model</span>
-              <select
-                value={folio.model ? `${folio.model.providerID}/${folio.model.id}` : ""}
-                onChange={(event) => {
-                  const choice = folio.models.find((m) => `${m.providerID}/${m.id}` === event.target.value);
-                  if (choice) folio.chooseModel({ providerID: choice.providerID, id: choice.id });
-                }}
-              >
-                {folio.model ? null : <option value="">The press's default</option>}
-                {folio.models.map((m) => (
-                  <option key={`${m.providerID}/${m.id}`} value={`${m.providerID}/${m.id}`}>
-                    {m.name ?? m.id}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <button
+              type="button"
+              className={folio.modelsOpen ? "on" : ""}
+              aria-expanded={folio.modelsOpen}
+              onClick={() => folio.setModelsOpen(!folio.modelsOpen)}
+            >
+              Model…
+            </button>
+          ) : null}
+          {folio.modelsOpen ? (
+            <div className="model-list" role="group" aria-label="Models">
+              {modelGroups(folio.models, folio.providers).map((group) => (
+                <div key={group.id} className="model-group">
+                  <p className="model-provider">{group.label}</p>
+                  {group.models.map((m) => {
+                    const current = folio.model?.providerID === m.providerID && folio.model?.id === m.id;
+                    return (
+                      <button
+                        key={`${m.providerID}/${m.id}`}
+                        type="button"
+                        className={current ? "on" : ""}
+                        aria-pressed={current}
+                        onClick={() => folio.chooseModel({ providerID: m.providerID, id: m.id })}
+                      >
+                        {m.name ?? m.id}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
           ) : null}
         </div>
       ) : null}

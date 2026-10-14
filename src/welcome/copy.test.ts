@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FIRST_PAGE, keyProviders, pressSummary } from "./copy";
+import { FIRST_PAGE, keyProviders, modelGroups, pressSummary } from "./copy";
 
 describe("first run", () => {
   it("offers key integrations from a short list, by their own names", () => {
@@ -26,6 +26,21 @@ describe("first run", () => {
       "opencode 2.0.28 · Anthropic, claude-x",
     );
     expect(pressSummary("2.0.28", [], null)).toBe("opencode 2.0.28");
+  });
+
+  it("groups the models by provider, the free one first, each named as the menu names it", () => {
+    const models = [
+      { providerID: "anthropic", id: "claude-x", name: "Claude X" },
+      { providerID: "opencode", id: "cat-jam-free", name: "Cat Jam Free" },
+      { providerID: "anthropic", id: "claude-y" },
+      { providerID: "opencode", id: "big-pickle", name: "Big Pickle" },
+    ];
+    const groups = modelGroups(models, [{ id: "anthropic", name: "Anthropic" }]);
+    expect(groups.map((g) => [g.label, g.models.map((m) => m.id)])).toEqual([
+      ["OpenCode Zen", ["cat-jam-free", "big-pickle"]],
+      ["Anthropic", ["claude-x", "claude-y"]],
+    ]);
+    expect(modelGroups([{ providerID: "groq", id: "llama" }], [])[0].label).toBe("groq");
   });
 
   it("keeps the first page short enough to read at a glance", () => {

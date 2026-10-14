@@ -4,6 +4,7 @@ import { Ornament } from "./icons";
 
 export function Welcome({
   press,
+  modelLabel,
   providerId,
   onProvider,
   providerKey,
@@ -27,6 +28,8 @@ export function Welcome({
   onUseKey,
 }: {
   press: PressPhase;
+  /** The model the press will write with, for the colophon line. */
+  modelLabel?: string | null;
   providerId: string;
   onProvider: (id: string) => void;
   providerKey: string;
@@ -91,7 +94,7 @@ export function Welcome({
           <h1>Folio</h1>
           <p className="subtitle">for a repository</p>
           <Ornament />
-          <p className="powered">Powered by opencode</p>
+          <p className="powered">Powered by opencode{modelLabel ? ` · set in ${modelLabel}` : ""}</p>
         </div>
       </article>
       <article className="sheet right">
@@ -137,6 +140,7 @@ export function Welcome({
                 {press.summary ? <>Using {press.summary}. </> : null}
                 Open a folder and the first chapter will be waiting, with the quill on the page.
               </p>
+              {press.note ? <p className="detail">{press.note}</p> : null}
               {showPath ? (
                 <form
                   onSubmit={(event) => {

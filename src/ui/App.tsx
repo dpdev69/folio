@@ -20,7 +20,13 @@ export function App() {
       <Chrome folio={folio} />
       {folio.notice ? (
         <p className="banner">
-          {folio.notice}{" "}
+          {folio.noticeAction === "choose-model" ? (
+            <button type="button" className="linkish banner-action" onClick={folio.openModels}>
+              {folio.notice}
+            </button>
+          ) : (
+            folio.notice
+          )}{" "}
           <button type="button" className="linkish" onClick={folio.dismissNotice}>
             dismiss
           </button>
@@ -41,6 +47,7 @@ export function App() {
         ) : (
           <Welcome
             press={folio.press}
+            modelLabel={folio.modelLabel}
             providerId={folio.providerId}
             onProvider={folio.setProviderId}
             providerKey={folio.providerKey}

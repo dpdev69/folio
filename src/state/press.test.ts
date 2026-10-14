@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startReplay, type Replay } from "../../scripts/replay-press.mjs";
 import type { Book, Chapter, Plate } from "../book/model";
 import { EngineClient } from "../engine/client";
-import { CANNOT_REVERT, loadBook, refreshBook, revertPlate } from "./press";
+import { CANNOT_REVERT, defaultModelChoice, loadBook, offeredModels, refreshBook, revertPlate } from "./press";
 
 const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
@@ -96,5 +96,39 @@ describe("pending asks and forms", () => {
     expect(fresh.chapters[0].forms.map((f) => f.id)).toEqual(["frm_137858dc2001K01Vv8YDfRjzW1"]);
     expect(fresh.chapters[1].asks).toEqual([stale]);
     expect(fresh.chapters[1].forms).toEqual([staleForm]);
+  });
+});
+
+const listed = [
+  { providerID: "anthropic", id: "claude-x", name: "Claude X", status: "active", enabled: true },
+  { providerID: "opencode", id: "exo-free", name: "Exo Free", status: "deprecated", enabled: true },
+  { providerID: "opencode", id: "cat-jam-free", name: "Cat Jam Free", status: "active", enabled: true },
+  { providerID: "opencode", id: "big-pickle", name: "Big Pickle", status: "active", enabled: false },
+];
+
+describe("the press's models", () => {
+  it("offers only the models that are active and enabled", () => {
+    expect(offeredModels(listed).map((m) => m.id)).toEqual(["claude-x", "cat-jam-free"]);
+    expect(offeredModels([{ providerID: "opencode", id: "plain" }]).map((m) => m.id)).toEqual(["plain"]);
+  });
+
+  it("keeps a default the press still offers", () => {
+    const choice = defaultModelChoice({ providerID: "anthropic", id: "claude-x" }, offeredModels(listed));
+    expect(choice).toEqual({ model: { providerID: "anthropic", id: "claude-x" } });
+  });
+
+  it("chooses the first free model for a default that is gone, and says so", () => {
+    const choice = defaultModelChoice({ providerID: "opencode", id: "exo-free" }, offeredModels(listed));
+    expect(choice).toEqual({
+      model: { providerID: "opencode", id: "cat-jam-free" },
+      note: "The press's default model, exo-free, is no longer offered, so Folio chose Cat Jam Free.",
+    });
+  });
+
+  it("leaves the default alone when there is no list to check it against or no free model", () => {
+    const gone = { providerID: "opencode", id: "exo-free" };
+    expect(defaultModelChoice(gone, [])).toEqual({ model: gone });
+    expect(defaultModelChoice(gone, [listed[0]])).toEqual({ model: gone });
+    expect(defaultModelChoice(null, offeredModels(listed))).toEqual({ model: null });
   });
 });
