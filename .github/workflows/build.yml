@@ -48,7 +48,22 @@ jobs:
       - name: Fetch the press
         run: npm run fetch-press
       - name: Bundle
-        run: npx tauri build --bundles ${{ matrix.bundles }}
+        shell: bash
+        # Tauri signs and notarizes on macOS only when these secrets exist.
+        # Without them the build is unsigned (ad-hoc), as before. Secrets that
+        # are not set arrive as empty strings, so empty ones are unset first.
+        run: |
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!v:-}" ]; then unset "$v"; fi
+          done
+          npx tauri build --bundles ${{ matrix.bundles }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - uses: actions/upload-artifact@v4
         with:
           name: folio-${{ matrix.os }}

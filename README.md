@@ -32,7 +32,7 @@ Open the desktop shell with:
 npm run tauri dev
 ```
 
-Folio looks for the binary next to its own executable (the bundled sidecar, named `opencode-cli`), then in `FOLIO_OPENCODE_BIN`, then `~/.opencode/bin/opencode`, then `PATH`. `opencode` 1.19 is the server this client was exercised against. The API moves quickly; event shapes we do not know are ignored.
+Folio looks for the binary next to its own executable (the bundled sidecar, named `opencode-cli`), then in `FOLIO_OPENCODE_BIN`, then `~/.opencode/bin/opencode`, then `PATH`. `opencode` 2.0.28 is the server this client was exercised against. The API moves quickly; event shapes we do not know are ignored.
 
 If the server was started with `OPENCODE_SERVER_PASSWORD`, type that password on the title page before opening a folder. The username is `opencode`.
 
@@ -75,10 +75,50 @@ npm run build
 
 ## What is stubbed
 
-- Signing and a real license check.
+- Notarization is wired but not run here, and the license check is a seam. See Release.
 - The library shelf, dog-ears, the Previously recap, themes, and other agents.
 - Approve-first is the permission toggle, not a separate editor. Reject means revert.
 - Page curl is a 3D turn with a lifted corner, not a full cylindrical mesh.
+
+## Release
+
+`scripts/release-macos.sh` builds the macOS app and dmg for Apple silicon.
+
+```bash
+scripts/release-macos.sh
+FOLIO_TARGET=x86_64-apple-darwin scripts/release-macos.sh
+```
+
+It runs `npm ci` if `node_modules` is missing, fetches the bundled press, then runs `tauri build --bundles app,dmg`. The outputs land in `src-tauri/target/<target>/release/bundle/`:
+
+- `macos/Folio.app`
+- `dmg/Folio_<version>_aarch64.dmg` (`_x64` for Intel)
+
+At the end the script prints those paths and says whether the build was signed. When it was not, it prints the `codesign` and `xcrun notarytool` commands a release engineer would run.
+
+### Signed-ready
+
+With no Apple identity configured the build is unsigned: Tauri applies an ad-hoc signature, the app runs on the machine that built it, and Gatekeeper warns elsewhere. Signed-ready means the package is already shaped for signing, so adding credentials is the only step left:
+
+- `src-tauri/Entitlements.plist` is wired into `bundle.macOS.entitlements`. It grants the hardened-runtime exceptions the Bun-built `opencode-cli` sidecar needs (`allow-jit`, `allow-unsigned-executable-memory`, `disable-library-validation`) and `network.client` for the local press.
+- `signingIdentity` is deliberately unset in `tauri.conf.json`. Tauri reads it from the environment.
+- The sidecar sits in `Contents/MacOS` beside the Folio executable, where Tauri signs it with the app.
+- The minimum system version is macOS 12.
+
+Environment variables Tauri reads:
+
+| Purpose | Variables |
+| --- | --- |
+| Sign with a keychain identity | `APPLE_SIGNING_IDENTITY` |
+| Sign in CI from a certificate | `APPLE_CERTIFICATE` (base64 .p12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` |
+| Notarize with an Apple ID | `APPLE_ID`, `APPLE_PASSWORD` (app-specific password), `APPLE_TEAM_ID` |
+| Notarize with an API key | `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH` |
+
+The CI macOS job passes the certificate, identity, and Apple ID variables through from repository secrets of the same names. If the secrets do not exist the build stays unsigned. To check a result:
+
+```bash
+codesign -dv --verbose=2 src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Folio.app
+```
 
 ## CI
 
