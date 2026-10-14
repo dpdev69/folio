@@ -1,0 +1,63 @@
+# Follow-ups after the 0.2.0 MVP pass
+
+Collected from the per-task and final reviews on 2026-10-14. None blocks a first session; each is a deferred improvement.
+
+- wrap cache keeps stale prefixes of the growing paragraph until 10k entries (wrap.ts:445) — consider not caching the last paragraph of the last block.
+- adoptPending can adopt into any non-marginal text part, not only the last block (events.ts:139,152,175,189).
+- followTail turns at most one spread per layout (nav.ts:608); use the chapter's last spread.
+- sentenceEnd regex counts "e.g. " and "1. " as sentence ends; misses "**Done.** Next".
+- events.test.ts:118 fixture has a chapter starting on an odd page (unreachable state).
+- local setBook calls are not coalesced and can land ahead of queued SSE events.
+- a mark after the last paragraph end or in a block with no paragraphs still rides the tail host (paginate.ts:112-116).
+- PowerShell Expand-Archive interpolates paths in single quotes (fetch-opencode.mjs:298-302).
+- ignores TAURI_ENV_TARGET_TRIPLE for cross-target builds (fetch-opencode.mjs:324-331).
+- no checksum verification of downloaded archives.
+- README "no 145 MB download" inaccurate (archive 85 MB, binary 186 MB); --dest undocumented.
+- THIRD_PARTY_NOTICES hardcodes 2.0.28; add a test tying it to package.json.
+- hostTriple test never calls hostTriple; fetch-opencode.mjs untested.
+- beside-drop lines can clip at 1024px (wrap.ts:38 vs styles.css:221 drop-w + 8px); clamp measure to the real prose width.
+- running title / terra contrast below 4.5:1 in Quiet and Calm light (themes.ts:89,153).
+- :root duplicates Original-light separately from themes.ts (styles.css:2-21).
+- faceEpoch bump re-wraps the whole book even when the face is already loaded (useFolio.ts:58-72).
+- possible light flash before mount for dark-mode users; no pre-mount script in index.html.
+- unknown tool name wording "tool…" (events.ts:235, tools.ts:92).
+- provisional plate from strings numbers lines from the snippet; permission.asked carries the real patch and could upgrade it (plates.ts:36-41).
+- retry/interrupted notices not cleared on failed/succeeded/execution.started (events.ts:40-47).
+- chapterFromMessages does not clear a stale error (transcript.ts:27-28).
+- recordOf/stringOf/firstString duplicated across events.ts, plates.ts, transcript.ts, tools.ts; maxLines 41 vs 42.
+- calls/turns grow without bound; transitional Frame index signature and EventFrame.properties.
+- applyDiff ignores data.turnMessageId on folio.diff and uses lastInkId (events.ts:87) — hook should pass it; prefer the frame's value.
+- renameBlock does not guard against `to` already existing as a block id.
+- setInstruction/synthetic/activeSessions/resync errors swallowed (press.ts:175,195,242; useFolio resync).
+- turnDiff 400 fallback labels the session diff as the current turn's.
+- sync Rust commands on the main thread; stop() can wait ~18 s behind attach (press.rs:153).
+- vite.config.ts stacks process.once("exit") listeners on server restart.
+- immediate open/close stream resets failures and churns paused/resumed (client.ts pump).
+- preparePress/attachPress do not abort an open book's stream.
+- answerAsk/answerForm/dismissForm silently drop when no client.
+- replay-press.mjs / client.test.ts hard-code a scratchpad path; no unit tests for press.ts; MAX_PAGES cutoff.
+- restartPress has no backoff across restarts; a press answering /api/info but failing /api/event cycles every ~3 s.
+- transient text holes in a busy chapter until session.text.ended heals them.
+- plate status not carried when the plate was created under a local- turn id before rename.
+- a hung-but-alive child is never killed by attach (press.rs); a restart during connect() can race.
+- hook restart/resync wiring has no unit test.
+- signed status inferred from env only; use codesign -dv after the build.
+- signing secrets reach all three OS jobs (build.yml:46-52).
+- CI dmgs are unstyled (runners set CI); x86_64 path untested.
+- `stapler validate "$dmg"` in the signed case should target $app (release-macos.sh).
+- /tmp/Folio-notarize.zip fixed path; API-key notarytool form not shown in manual commands.
+- reversing an added file writes "" instead of deleting; deleted-file reverse fails with an engine error (diff.ts:180).
+- CRLF normalized to LF on Reject (diff.ts:159).
+- offeredModels keeps only status "active" (press.ts:167); null default never triggers fallback.
+- transcript same[0] fallback can re-open an answered note (transcript.ts:51).
+- findPlate duplicated (BookView.tsx:291 / useFolio.ts:889); askFor repeats plate-<callId> naming; platesOnSpread uses only the left page's chapter; option descriptions only in title.
+- slip text in README lacks "— open it"; ".folio/press" wording; dev host finds the fetched sidecar before ~/.opencode; "about 85 MB" unverified.
+- a diff-<file> plate's patch is frozen at the first scoped diff; display can widen while Reject undoes only its own patch (plates.ts:105).
+- a tool plate with no metadata patch can take the combined turn patch (plates.ts, .pop()).
+- ask toggle applies only to new chapters and is not persisted; lines per page do not shrink for a short window (<700 px sheet); model reasoning / stray </think> shown as sent; stop link remounts during a curl.
+- a pile of footnotes on one line can still exceed the page (paginate.ts:67); group or carry footnotes.
+- ask titles keep raw paths; forms not counted in the foot.
+- foot's fixed overhead (~17 px) not counted (scales.ts:70-72); rewording a footnote after the turn can reflow later pages.
+- bookPath misses Windows/case/`/tmp` vs `/private/tmp`; doubled "…." in clipped shell footnotes; browserStorage duplicated; stale plate keys leak past the cap when the index is garbled.
+- a diff plate id can bake in a local- turn id if the diff frame lands before the rename (renameBlock rewrites turnMessageId but not plate.id); worst case a status reloads as open.
+- Final review: Reject writes via /api/experimental/fs/write before the Folio host write (ruling 5 wording); multi-edit turn plates show A+B while Reject undoes B; SIGKILL on quit without a grace period (press.rs:153-161, host.ts:79-86); 10 s readiness timeout may be short on first launch; refreshBook sequential per chapter; no React error boundary; Reject has no in-flight state; Rust probe tries only the first resolved address; useFolio.ts at ~936 lines (next split: press hook + stream hook); helper duplication (recordOf/stringOf/browserStorage/findPlate). Before first signed public release: SHA-256 pins in fetch-opencode.mjs; Apple secrets scoped to the macOS job; stapler validate should target the app; hung press never killed.
