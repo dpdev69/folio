@@ -64,7 +64,9 @@ export function useFolio() {
   const clientRef = useRef<EngineClient | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<number | null>(null);
-  const jumpRef = useRef<string | null>(null);
+  // The chapter to turn to once it is laid out. State, not a ref: the chapter may be laid out
+  // before the jump is asked for (its session.created frame can beat the create call's reply).
+  const [jumpTo, setJumpTo] = useState<string | null>(null);
   const diffTimers = useRef(new Map<string, number>());
   const providersRef = useRef<ProviderInfo[]>([]);
   const bookRef = useRef<Book | null>(null);
@@ -169,15 +171,15 @@ export function useFolio() {
   const spreadCount = Math.max(1, Math.ceil(layout.pages.length / 2));
 
   useEffect(() => {
-    const id = jumpRef.current;
+    const id = jumpTo;
     if (!fontsReady || !id || layout.chapterStart[id] == null) return;
-    jumpRef.current = null;
+    setJumpTo(null);
     const spread = Math.floor(layout.chapterStart[id] / 2);
     setNav((current) => {
       if (current.view === "reading" && current.spread === spread && !current.curl) return current;
       return { ...current, view: "reading", margin: false, curl: { to: spread, forward: spread >= current.spread } };
     });
-  }, [layout.chapterStart, fontsReady]);
+  }, [layout.chapterStart, fontsReady, jumpTo]);
 
   const prevPages = useRef<string[]>([]);
   useEffect(() => {
@@ -266,7 +268,7 @@ export function useFolio() {
       setNav(initialNav(spread));
       return;
     }
-    jumpRef.current = "ch-iv";
+    setJumpTo("ch-iv");
     setNav(initialNav(0));
   }
 
@@ -315,7 +317,7 @@ export function useFolio() {
       setEngineState("ready");
       setShowPath(false);
       const last = next.chapters[next.chapters.length - 1];
-      jumpRef.current = last?.id ?? null;
+      setJumpTo(last?.id ?? null);
       setNav(initialNav(0));
       setNotice(null);
     } catch (error) {
@@ -537,7 +539,7 @@ export function useFolio() {
         busy: false,
       };
       setBook({ ...book, chapters: [...book.chapters, chapter] });
-      jumpRef.current = id;
+      setJumpTo(id);
       return;
     }
     const client = clientRef.current;
@@ -552,7 +554,7 @@ export function useFolio() {
             })
           : current,
       );
-      jumpRef.current = created.id;
+      setJumpTo(created.id);
     } catch (error) {
       setNotice(messageOf(error, "A new chapter could not be opened."));
     }
