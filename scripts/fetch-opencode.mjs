@@ -242,7 +242,8 @@ async function main() {
     const found = await findFile(unpacked, asset.exe);
     if (!found) throw new Error(`${asset.name} did not contain ${asset.exe}.`);
     await mkdir(dir, { recursive: true });
-    const staged = join(work, "staged");
+    // Keep the executable's own name: Windows will not spawn a binary without its .exe.
+    const staged = join(work, `staged-${asset.exe}`);
     await rename(found, staged);
     await chmod(staged, 0o755);
     if (runnable) {
