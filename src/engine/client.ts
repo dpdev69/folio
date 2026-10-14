@@ -58,6 +58,12 @@ export type EngineOptions = {
     retryDelay?: (attempt: number) => number;
     /** `folio.stream-failing` is sent after every this many failed reconnects in a row (default 3). */
     failingEvery?: number;
+    /**
+     * A connection counts as made once it has stayed open this long (default 2 s)
+     * or brought an event other than `server.connected`. One that drops sooner
+     * is a failed reconnect: the backoff goes on and no resume is announced.
+     */
+    steadyMs?: number;
   };
 };
 
@@ -98,6 +104,8 @@ export class EngineClient {
   private readonly auth: string;
   /** Called when a request finds nothing answering (status 0), so the owner can start the press again. */
   onUnreachable?: () => void;
+  /** Called each time the event stream has held long enough to count as made (see `steadyMs`). */
+  onSteady?: () => void;
 
   private readonly opts: EngineOptions;
 
@@ -285,16 +293,20 @@ export class EngineClient {
     }
   }
 
+  /**
+   * Write a file in the book: through Folio's own host (the shell or the dev
+   * host) when there is one, and through the press's experimental route only
+   * when there is not.
+   */
   async writeFile(directory: string, path: string, content: string): Promise<void> {
-    try {
-      await this.request("POST", "/api/experimental/fs/write", {
-        query: { "location[directory]": directory, path },
-        raw: content,
-      });
-    } catch (error) {
-      if (!this.opts.host?.writeFile || !fallsBack(error)) throw error;
+    if (this.opts.host?.writeFile) {
       await this.opts.host.writeFile(directory, path, content);
+      return;
     }
+    await this.request("POST", "/api/experimental/fs/write", {
+      query: { "location[directory]": directory, path },
+      raw: content,
+    });
   }
 
   /** Remove a file in the book, through the host: the press has no route for it. */
@@ -319,6 +331,7 @@ export class EngineClient {
     const silenceMs = this.opts.stream?.silenceMs ?? 45_000;
     const retryDelay = this.opts.stream?.retryDelay ?? backoffDelay;
     const failingEvery = this.opts.stream?.failingEvery ?? 3;
+    const steadyMs = this.opts.stream?.steadyMs ?? 2000;
     let failures = 0;
     let paused = false;
     while (!signal.aborted) {
@@ -326,12 +339,22 @@ export class EngineClient {
       const stop = () => ctrl.abort();
       signal.addEventListener("abort", stop);
       const dog = watchdog(silenceMs, () => ctrl.abort(new Error("The event stream went quiet.")));
+      let steadyTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         const response = await fetch(this.url("/api/event"), { headers: { Authorization: this.auth }, signal: ctrl.signal });
         if (!response.ok || !response.body) throw await failure(response, this.version);
-        if (paused) onFrame({ type: "folio.stream-resumed", data: {} });
-        paused = false;
-        failures = 0;
+        // Only a connection that holds is a return: one that opens and drops at once keeps the backoff going.
+        let steady = false;
+        const settle = () => {
+          if (steady || signal.aborted) return;
+          steady = true;
+          if (steadyTimer !== undefined) clearTimeout(steadyTimer);
+          if (paused) onFrame({ type: "folio.stream-resumed", data: {} });
+          paused = false;
+          failures = 0;
+          this.onSteady?.();
+        };
+        steadyTimer = setTimeout(settle, steadyMs);
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let rest = "";
@@ -341,7 +364,11 @@ export class EngineClient {
           dog.poke();
           const parsed = pushSse(rest, decoder.decode(value, { stream: true }));
           rest = parsed.rest;
-          for (const event of parsed.events) onFrame(unwrapEvent(event));
+          for (const event of parsed.events) {
+            const frame = unwrapEvent(event);
+            if (frame.type !== "server.connected") settle();
+            onFrame(frame);
+          }
         }
         throw new Error("The event stream closed.");
       } catch (error) {
@@ -354,6 +381,7 @@ export class EngineClient {
         if (attempts > 0 && attempts % failingEvery === 0) onFrame({ type: "folio.stream-failing", data: { attempts } });
         await sleep(retryDelay(failures), signal);
       } finally {
+        if (steadyTimer !== undefined) clearTimeout(steadyTimer);
         dog.stop();
         signal.removeEventListener("abort", stop);
       }

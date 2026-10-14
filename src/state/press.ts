@@ -20,6 +20,19 @@ import {
 import { patchSides, reversePatch } from "../book/diff";
 import type { EventFrame } from "../engine/sse";
 import { pressSummary, type PressPhase } from "../welcome/copy";
+import { browserStorage, type KeyStore } from "./storage";
+
+/** Where a step that went on without something says so, in a sentence for the banner. */
+export type Notices = { onNotice?: (sentence: string) => void };
+
+/** Said when the press would not take Folio's writing style for a new chapter. */
+export const STYLE_MISSED = "The press did not take Folio's writing style for this chapter, so it writes in its own voice.";
+/** Said when the press would not say which chapters it is running. */
+export const RUNNING_UNKNOWN = "The press did not say which chapters it is writing; they rest until it sends word.";
+/** Said when the file was set back but the model was not told. */
+export const NOT_TOLD = "The file was restored, but the press was not told and may make the change again.";
+/** Said when a resync after a pause could not read the history. */
+export const RESYNC_FAILED = "Folio could not read the chapters again after the pause; the next turn will set them right.";
 
 /** The press asks before it edits a file or runs a command. */
 export const ASK_RULES: PermissionRule[] = [
@@ -188,11 +201,15 @@ export async function openPress(host: PressHost, target?: AttachTarget, chosen: 
   };
 }
 
-/** The models the press will still run: active and enabled, when it says. */
+/**
+ * The models the press will still run: every one it lists, unless it says the
+ * model is deprecated or not enabled. A model with no status, or an alpha or
+ * beta one, is offered.
+ */
 export function offeredModels<M extends ModelInfo>(models: M[]): M[] {
   return models.filter((model) => {
     const { status, enabled } = model as { status?: unknown; enabled?: unknown };
-    return (status === undefined || status === "active") && enabled !== false;
+    return status !== "deprecated" && enabled !== false;
   });
 }
 
@@ -207,12 +224,16 @@ export function defaultModelChoice(
   chosen: ModelRef | null = null,
 ): { model: ModelRef | null; note?: string } {
   if (chosen && offered.some((m) => m.providerID === chosen.providerID && m.id === chosen.id)) return { model: chosen };
-  if (!model || !offered.length || offered.some((m) => m.providerID === model.providerID && m.id === model.id)) return { model };
+  if (!offered.length || (model && offered.some((m) => m.providerID === model.providerID && m.id === model.id))) return { model };
+  // A press that names no default offers none: the fallback runs as for a default that is gone.
   const free = offered.find((m) => m.providerID === "opencode");
   if (!free) return { model };
+  const name = free.name ?? free.id;
   return {
     model: { providerID: free.providerID, id: free.id },
-    note: `The press's default model, ${model.id}, is no longer offered, so Folio chose ${free.name ?? free.id}.`,
+    note: model
+      ? `The press's default model, ${model.id}, is no longer offered, so Folio chose ${name}.`
+      : `The press named no default model, so Folio chose ${name}.`,
   };
 }
 
@@ -232,7 +253,7 @@ export async function reattachPress(host: PressHost, target?: AttachTarget): Pro
 export async function openChapter(
   client: EngineClient,
   directory: string,
-  opts: { askBeforeWrite: boolean; model?: ModelRef | null },
+  opts: { askBeforeWrite: boolean; model?: ModelRef | null } & Notices,
 ): Promise<SessionInfo> {
   const session = await client.createSession({
     title: "Untitled",
@@ -240,8 +261,9 @@ export async function openChapter(
     permissions: opts.askBeforeWrite ? ASK_RULES : undefined,
     model: opts.model ?? undefined,
   });
-  // The chapter works without the style; it is only the voice.
-  await client.setInstruction(session.id, "folio.style", PRESS_STYLE).catch(() => {});
+  // The chapter works without the style; it is only the voice. A press without the route
+  // answers 404, which setInstruction leaves silent; anything else is said once.
+  await client.setInstruction(session.id, "folio.style", PRESS_STYLE).catch(() => opts.onNotice?.(STYLE_MISSED));
   return session;
 }
 
@@ -249,7 +271,7 @@ export async function openChapter(
 export async function loadBook(
   client: EngineClient,
   directory: string,
-  opts: { askBeforeWrite: boolean; model?: ModelRef | null },
+  opts: { askBeforeWrite: boolean; model?: ModelRef | null } & Notices,
 ): Promise<Book> {
   let sessions = await client.sessions(directory);
   if (!sessions.length) sessions = [await openChapter(client, directory, opts)];
@@ -259,26 +281,48 @@ export async function loadBook(
     const { done } = await applyAskRules(client, book.chapters.filter((c) => !c.askRules).map((c) => c.id), true);
     book = { ...book, chapters: book.chapters.map((c) => (done.includes(c.id) ? { ...c, askRules: true } : c)) };
   }
-  return refreshBook(client, book);
+  return refreshBook(client, book, opts);
 }
 
 /**
  * Set every chapter again from its history, its latest turn's diff, and
  * whether the press is running it. Used on open and after the stream returns.
  */
-export async function refreshBook(client: EngineClient, book: Book): Promise<Book> {
-  const running = new Set(await client.activeSessions().catch(() => []));
-  const chapters: Chapter[] = [];
-  for (const chapter of book.chapters) {
+export async function refreshBook(client: EngineClient, book: Book, opts: Notices = {}): Promise<Book> {
+  const running = new Set(
+    await client.activeSessions().catch(() => {
+      opts.onNotice?.(RUNNING_UNKNOWN);
+      return [] as string[];
+    }),
+  );
+  // A few chapters are read at a time; the book keeps its order whatever order they finish in.
+  const chapters = await mapLimit(book.chapters, REFRESH_LIMIT, async (chapter) => {
     let next = chapterFromMessages(chapter, await client.messages(chapter.id), book.directory);
     const frame = await turnDiff(client, next).catch(() => null);
     if (frame) next = applyEvent({ ...book, chapters: [next] }, frame).chapters[0];
     // The press's list of waiting asks and forms is the truth; if it cannot be read, keep what is held.
     const waiting = await pendingFrames(client, chapter.id).catch(() => null);
     if (waiting) next = waiting.reduce(applyEvent, { ...book, chapters: [{ ...next, asks: [], forms: [] }] }).chapters[0];
-    chapters.push({ ...next, busy: running.has(next.id) });
-  }
+    return { ...next, busy: running.has(next.id) };
+  });
   return { ...book, chapters };
+}
+
+/** Chapters read from history at once on open and after an outage. */
+export const REFRESH_LIMIT = 4;
+
+/** `work` over every item, at most `limit` at a time, with the results in the items' order. */
+export async function mapLimit<T, R>(items: T[], limit: number, work: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await work(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, lane));
+  return results;
 }
 
 /**
@@ -295,23 +339,35 @@ export async function pendingFrames(client: EngineClient, sessionId: string): Pr
 }
 
 /**
- * The `folio.diff` frame for a chapter's current turn: the diff from the
- * turn's user message on, or the whole session's when the press will not
- * scope it (a turn whose id it does not know yet). The whole session's diff is
- * marked `unscoped`, so its patches never become a plate's own.
+ * The `folio.diff` frame for a turn of the chapter (by default its latest):
+ * the diff from the turn's user message on, labelled with that message id.
+ *
+ * The whole session's diff is never labelled as a turn's: it may hold other
+ * turns' changes. A chapter with no ink at all has no turn to claim, so it
+ * gets the session's diff, `unscoped` and with no turn named. A turn the press
+ * has not named yet (`local-…`) or will not scope (400) gets an empty diff, so
+ * the chapter is marked fresh without plates that would claim the turn; the
+ * hook waits for the turn's name before it asks.
  */
-export async function turnDiff(client: EngineClient, chapter: Chapter): Promise<EventFrame> {
-  const turn = lastInk(chapter);
-  let diff;
-  let unscoped = !turn;
-  try {
-    diff = await client.diff(chapter.id, turn);
-  } catch (error) {
-    if (!turn || !(error instanceof EngineError) || error.status !== 400) throw error;
-    diff = await client.diff(chapter.id);
-    unscoped = true;
+export async function turnDiff(client: EngineClient, chapter: Chapter, turn: string | undefined = lastInkId(chapter)): Promise<EventFrame> {
+  if (!turn) {
+    const diff = await client.diff(chapter.id);
+    return { type: "folio.diff", data: { sessionID: chapter.id, diff, unscoped: true } };
   }
-  return { type: "folio.diff", data: { sessionID: chapter.id, diff, turnMessageId: turn, ...(unscoped ? { unscoped } : {}) } };
+  const empty: EventFrame = { type: "folio.diff", data: { sessionID: chapter.id, diff: [], turnMessageId: turn, unscoped: true } };
+  if (isLocalId(turn)) return empty;
+  try {
+    const diff = await client.diff(chapter.id, turn);
+    return { type: "folio.diff", data: { sessionID: chapter.id, diff, turnMessageId: turn } };
+  } catch (error) {
+    if (error instanceof EngineError && error.status === 400) return empty;
+    throw error;
+  }
+}
+
+/** An ink line the press has not named yet. */
+export function isLocalId(id: string | undefined): boolean {
+  return Boolean(id?.startsWith("local-"));
 }
 
 /**
@@ -333,7 +389,7 @@ export const CANNOT_REVERT = "This plate cannot be set back on its own.";
  * empty; a file it removed is written back from the patch. Session revert is
  * not used; it would delete the chapter's history.
  */
-export async function revertPlate(client: EngineClient, book: Book, chapter: Chapter, plate: Plate): Promise<EventFrame> {
+export async function revertPlate(client: EngineClient, book: Book, chapter: Chapter, plate: Plate, opts: Notices = {}): Promise<EventFrame> {
   // Without its own patch a plate cannot be told apart from later changes to the file.
   if (!plate.patch) throw new Error(CANNOT_REVERT);
   const created = createsFile(plate);
@@ -358,7 +414,7 @@ export async function revertPlate(client: EngineClient, book: Book, chapter: Cha
   } else {
     await client.writeFile(book.directory, plate.file, before);
   }
-  await client.synthetic(chapter.id, revertNote(plate.file)).catch(() => {});
+  await client.synthetic(chapter.id, revertNote(plate.file)).catch(() => opts.onNotice?.(NOT_TOLD));
   return turnDiff(client, chapter);
 }
 
@@ -393,11 +449,11 @@ export function bookFromSessions(directory: string, sessions: SessionInfo[]): Bo
   };
 }
 
-/** The user message that began the chapter's current turn, once the press has named it. */
-function lastInk(chapter: Chapter): string | undefined {
+/** The ink line that began the chapter's current turn: a message id, or `local-…` before the press names it. */
+export function lastInkId(chapter: Chapter): string | undefined {
   for (let i = chapter.blocks.length - 1; i >= 0; i--) {
     const block = chapter.blocks[i];
-    if (block.voice === "ink") return block.id.startsWith("local-") ? undefined : block.id;
+    if (block.voice === "ink") return block.id;
   }
   return undefined;
 }
@@ -406,17 +462,9 @@ export function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-type ModelStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+type ModelStorage = KeyStore;
 
 const MODEL_KEY = "folio.model";
-
-function browserStorage(): ModelStorage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /** The model the reader last chose from the menu, so a reload does not fall back to a model the press cannot run. */
 export function loadChosenModel(storage: ModelStorage | null = browserStorage()): ModelRef | null {

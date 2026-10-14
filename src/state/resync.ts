@@ -5,6 +5,7 @@
  */
 import { applyEvent, setText, textBlockId, type Frame } from "../book/events";
 import type { Book, Chapter } from "../book/model";
+import { recordOf, stringOf } from "../book/values";
 import { FIRST_PAGE, FIRST_PAGE_ID } from "../welcome/copy";
 
 /**
@@ -101,12 +102,4 @@ export function ensureFirstPage(book: Book): Book {
         : chapter,
     ),
   };
-}
-
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
-}
-
-function stringOf(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
 }

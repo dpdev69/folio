@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { startReplay, type Replay } from "../../scripts/replay-press.mjs";
+import { REPLAY_DIRECTORY, startReplay, type Replay } from "../../scripts/replay-press.mjs";
 import type { Book, Chapter, Plate } from "../book/model";
 import { EngineClient } from "../engine/client";
 import {
@@ -11,7 +11,13 @@ import {
   loadAskBeforeWrite,
   loadBook,
   loadChosenModel,
+  mapLimit,
+  NOT_TOLD,
   offeredModels,
+  openChapter,
+  REFRESH_LIMIT,
+  RUNNING_UNKNOWN,
+  STYLE_MISSED,
   refreshBook,
   revertNote,
   revertPlate,
@@ -20,7 +26,7 @@ import {
   turnDiff,
 } from "./press";
 
-const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
+const DIRECTORY = REPLAY_DIRECTORY;
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
 
 let replay: Replay | undefined;
@@ -56,12 +62,30 @@ describe("turnDiff", () => {
     expect(replay.requests.filter((r) => r.path.endsWith("/diff"))).toHaveLength(1);
   });
 
-  it("marks the whole session's diff as unscoped when the press will not scope it", async () => {
-    const { client } = await press();
+  it("never labels the whole session's diff as a turn's", async () => {
+    const { replay, client } = await press();
     const refused = await turnDiff(client, chapter({ blocks: [ink("msg_not_a_user_message")] }));
-    expect(refused.data).toMatchObject({ unscoped: true });
+    expect(refused.data).toMatchObject({ diff: [], unscoped: true });
     const unnamed = await turnDiff(client, chapter({ blocks: [ink("local-1")] }));
-    expect(unnamed.data).toMatchObject({ unscoped: true });
+    expect(unnamed.data).toMatchObject({ diff: [], unscoped: true });
+    // Only the refused turn asked; the unnamed one was not sent at all, and nothing fell back to the session.
+    const asked = replay.requests.filter((r) => r.path.endsWith("/diff"));
+    expect(asked.map((r) => r.query.from)).toEqual(["msg_not_a_user_message"]);
+  });
+
+  it("gives a chapter with no turn at all the session's diff, naming no turn", async () => {
+    const { client } = await press();
+    const frame = await turnDiff(client, chapter());
+    expect(frame.data).toMatchObject({ unscoped: true });
+    expect((frame.data as { diff: unknown[] }).diff.length).toBeGreaterThan(0);
+    expect((frame.data as { turnMessageId?: string }).turnMessageId).toBeUndefined();
+  });
+
+  it("scopes to the turn it is given rather than the chapter's latest", async () => {
+    const { replay, client } = await press();
+    const frame = await turnDiff(client, chapter({ blocks: [ink("local-9")] }), "msg_1378318cd0011en9zAGWcvx4bC");
+    expect(frame.data).toMatchObject({ turnMessageId: "msg_1378318cd0011en9zAGWcvx4bC" });
+    expect(replay.requests.filter((r) => r.path.endsWith("/diff")).map((r) => r.query.from)).toEqual(["msg_1378318cd0011en9zAGWcvx4bC"]);
   });
 });
 
@@ -220,7 +244,26 @@ describe("the press's models", () => {
     const gone = { providerID: "opencode", id: "exo-free" };
     expect(defaultModelChoice(gone, [])).toEqual({ model: gone });
     expect(defaultModelChoice(gone, [listed[0]])).toEqual({ model: gone });
-    expect(defaultModelChoice(null, offeredModels(listed))).toEqual({ model: null });
+    expect(defaultModelChoice(null, [])).toEqual({ model: null });
+    expect(defaultModelChoice(null, [listed[0]])).toEqual({ model: null });
+  });
+
+  it("treats a press that names no default as offering none, and falls back to a free model", () => {
+    expect(defaultModelChoice(null, offeredModels(listed))).toEqual({
+      model: { providerID: "opencode", id: "cat-jam-free" },
+      note: "The press named no default model, so Folio chose Cat Jam Free.",
+    });
+  });
+
+  it("offers models with no status, and alpha or beta ones, but not deprecated or disabled ones", () => {
+    const more = [
+      { providerID: "opencode", id: "plain" },
+      { providerID: "opencode", id: "early", status: "beta" },
+      { providerID: "opencode", id: "earlier", status: "alpha" },
+      { providerID: "opencode", id: "old", status: "deprecated" },
+      { providerID: "opencode", id: "off", enabled: false },
+    ];
+    expect(offeredModels(more).map((m) => m.id)).toEqual(["plain", "early", "earlier"]);
   });
 
   it("prefers the model the reader chose last time, while the press still offers it", () => {
@@ -319,5 +362,67 @@ describe("asking before the press writes", () => {
     const broken = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("quota"); }, removeItem: () => undefined };
     expect(loadAskBeforeWrite(broken)).toBe(false);
     expect(() => saveAskBeforeWrite(true, broken)).not.toThrow();
+  });
+});
+
+describe("reading every chapter again", () => {
+  it("reads a few chapters at a time and keeps the book's order", async () => {
+    let live = 0;
+    let most = 0;
+    const done = await mapLimit([50, 10, 30, 0, 20, 5, 40], REFRESH_LIMIT, async (ms, i) => {
+      live += 1;
+      most = Math.max(most, live);
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      live -= 1;
+      return i;
+    });
+    expect(done).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(most).toBe(REFRESH_LIMIT);
+    expect(await mapLimit([], 4, async () => 1)).toEqual([]);
+  });
+
+  it("refreshes chapters in order and says when the press will not name its running chapters", async () => {
+    const { client } = await press();
+    client.activeSessions = async () => {
+      throw new Error("no");
+    };
+    const notices: string[] = [];
+    const ids = [SESSION, "ses_a", "ses_b", "ses_c", "ses_d", "ses_e"];
+    const fresh = await refreshBook(client, book(ids.map((id) => chapter({ id }))), { onNotice: (n) => notices.push(n) });
+    expect(fresh.chapters.map((c) => c.id)).toEqual(ids);
+    expect(notices).toEqual([RUNNING_UNKNOWN]);
+  });
+});
+
+describe("steps that go on without something say so", () => {
+  it("says when the press would not take the style, and stays silent when it has no such route", async () => {
+    const { client } = await press();
+    const notices: string[] = [];
+    // The replay press has no instruction route: a 404, silent by design.
+    await openChapter(client, DIRECTORY, { askBeforeWrite: false, onNotice: (n) => notices.push(n) });
+    expect(notices).toEqual([]);
+    client.setInstruction = async () => {
+      throw new Error("The press stumbled.");
+    };
+    const session = await openChapter(client, DIRECTORY, { askBeforeWrite: false, onNotice: (n) => notices.push(n) });
+    expect(session.id).toBeTruthy();
+    expect(notices).toEqual([STYLE_MISSED]);
+  });
+
+  it("says when a Reject restored the file but the model was not told", async () => {
+    replay = await startReplay({ password: "pw" });
+    const written: string[] = [];
+    const client = new EngineClient(replay.url, { password: "pw", host: { writeFile: async (_d, path) => void written.push(path) } });
+    client.synthetic = async () => {
+      throw new Error("The press stumbled.");
+    };
+    const notices: string[] = [];
+    const RENAME = "@@ -1,3 +1,3 @@\n-export function hello(name: string): string {\n+export function greet(name: string): string {\n   return `Hello, ${name}!`;\n }\n";
+    const ch = chapter();
+    await revertPlate(client, book([ch]), ch, plate({ patch: RENAME }), { onNotice: (n) => notices.push(n) });
+    expect(written).toEqual(["src/greet.ts"]);
+    expect(notices).toEqual([NOT_TOLD]);
+    // The host wrote it: the press's experimental write route was never asked.
+    expect(replay.requests.some((r) => r.path === "/api/experimental/fs/write")).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useReducer, useState } from "react";
 import { DEFAULT_SCALE_INDEX, SCALES, type LineSpacing, type Margins } from "../ui/scales";
 import { isThemeId, themeById, themeVars, type ResolvedAppearance, type ThemeId } from "../ui/themes";
+import { browserStorage } from "./storage";
 
 export type Appearance = "light" | "dark" | "auto";
 
@@ -93,14 +94,6 @@ export function saveSettings(storage: Store | null, settings: Settings): void {
     storage?.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {
     // A full or private store only costs us remembering; the page still reads.
-  }
-}
-
-function browserStorage(): Store | null {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
   }
 }
 

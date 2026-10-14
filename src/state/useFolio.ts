@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { applyEvent, appendPrompt, MODEL_GONE, noteSent, renameBlock } from "../book/events";
 import { paginateBook, type LaidPage } from "../book/paginate";
-import { chapterRoman, displayTitle, isUntitled, type Book, type Chapter, type Plate } from "../book/model";
+import { chapterRoman, displayTitle, findPlate, isUntitled, type Book, type Chapter, type Plate } from "../book/model";
 import { SAMPLE_BREAKS, SAMPLE_DRAFT, sampleBook, sampleNoteReply, sampleReply } from "../book/sample";
 import { composeNote } from "../book/notes";
 import { revealNextLine, type Measure } from "../book/wrap";
-import type { EngineClient, FormAnswer, ModelInfo, ModelRef, ProviderInfo } from "../engine/client";
-import { coalesce } from "../engine/coalesce";
-import type { EventFrame } from "../engine/sse";
+import type { EngineClient, FormAnswer, ModelRef } from "../engine/client";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, initialNav, reduceNav, type Nav } from "./nav";
 import { save as savePlates, withKeptPlates } from "./plateStore";
 import { DEFAULT_SCALE_INDEX, SCALES, footChars, footFont, footReserve, inkFont, layoutScale, proseFont } from "../ui/scales";
 import { useSettings } from "./useSettings";
-import { keyProviders, pressSummary, type PressPhase } from "../welcome/copy";
 import {
   applyAskRules,
   ASK_RULES,
@@ -21,55 +18,44 @@ import {
   loadAskBeforeWrite,
   saveAskBeforeWrite,
   isTauri,
+  isLocalId,
+  lastInkId,
   loadBook,
   messageOf,
-  offeredModels,
   openChapter,
-  openPress,
-  pressHost,
-  reattachPress,
-  refreshBook,
-  loadChosenModel,
-  saveChosenModel,
   revertPlate,
   createsFile,
   turnDiff,
-  type AttachTarget,
 } from "./press";
-import { ensureFirstPage, mergeResync } from "./resync";
+import { ensureFirstPage } from "./resync";
+import { usePress } from "./usePress";
+import { useStream } from "./useStream";
 
-export type EngineState = "off" | "connecting" | "ready" | "error";
+export type { EngineState } from "./usePress";
+
+/** Said when a question cannot reach the press; it stays where it is. */
+export const NOT_ANSWERING = "The press is not answering, so the question waits here until it does.";
+/** How often, and how many times, a stale diff waits for its turn to be named. */
+const DIFF_WAIT_MS = 300;
+const DIFF_WAIT_TRIES = 20;
 
 export function useFolio() {
   const [book, setBook] = useState<Book | null>(null);
   const [nav, setNav] = useState<Nav>({ ...initialNav(), view: "desk" });
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [press, setPress] = useState<PressPhase>({ phase: "checking" });
-  const [providerId, setProviderId] = useState("openai");
-  const [providerKey, setProviderKey] = useState("");
-  const [savingKey, setSavingKey] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
   const [selection, setSelection] = useState<string | null>(null);
   const [askBeforeWrite, setAskBeforeWrite] = useState(() => loadAskBeforeWrite());
-  const [engineState, setEngineState] = useState<EngineState>("off");
-  const [engineVersion, setEngineVersion] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [place, setPlace] = useState<number | null>(null);
   const [pathDraft, setPathDraft] = useState("");
-  const [passwordDraft, setPasswordDraft] = useState("");
-  const [pressUrlDraft, setPressUrlDraft] = useState("");
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [model, setModel] = useState<ModelRef | null>(null);
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [modelsOpen, setModelsOpen] = useState(false);
   const [showPath, setShowPath] = useState(false);
   const [reduced, setReduced] = useState(false);
   const [fontsReady, setFontsReady] = useState(false);
-  const clientRef = useRef<EngineClient | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const streamRef = useRef<number | null>(null);
   // The chapter to turn to once it is laid out. State, not a ref: the chapter may be laid out
   // before the jump is asked for (its session.created frame can beat the create call's reply).
@@ -77,17 +63,25 @@ export function useFolio() {
   const diffTimers = useRef(new Map<string, number>());
   // A chapter being opened; a second turn past the last spread meanwhile must not open another.
   const creatingRef = useRef(false);
-  const providersRef = useRef<ProviderInfo[]>([]);
   const bookRef = useRef<Book | null>(null);
   bookRef.current = book;
   const seenErrors = useRef(new Map<string, string>());
-  // The stream and the press behind it: whether the stream is in an outage, the
-  // press being started again, the attach target to reach it with, and the
-  // frames that reached the page while a resync read the history.
-  const pausedRef = useRef(false);
-  const restartingRef = useRef(false);
-  const targetRef = useRef<AttachTarget | undefined>(undefined);
-  const resyncRef = useRef<{ frames: EventFrame[]; again: boolean; signal: AbortSignal } | null>(null);
+  // The open book's stream, and the press behind it.
+  const stream = useStream({ setBook, bookRef, setNotice, onFailing: () => void pressing.restartPress() });
+  const pressing = usePress({
+    setNotice,
+    isPaused: () => stream.isPaused(),
+    onDetach: () => stream.stop(),
+    onAttached: (client) => {
+      const current = bookRef.current;
+      if (!current || current.sample) return;
+      client.useDirectory(current.directory);
+      const signal = stream.listen(client);
+      void stream.resync(client, signal);
+    },
+  });
+  const { clientRef, press, engineState, setEngineState, engineVersion, models, model, providers } = pressing;
+  const editBook = stream.editBook;
   const { settings, dispatch: setSettings, theme, appearance } = useSettings();
   const { scaleIndex, lineSpacing, margins } = settings;
   const scale = useMemo(
@@ -98,10 +92,20 @@ export function useFolio() {
 
   useEffect(() => {
     // A weight or face the page has not used yet is not loaded; fetch it, then measure again.
+    // A face already loaded measures the same; only a newly loaded one re-wraps the book.
     let live = true;
+    const font = proseFont(scale, theme);
+    let loaded = false;
+    try {
+      loaded = document.fonts.check(font);
+    } catch {
+      loaded = false;
+    }
     document.fonts
-      .load(proseFont(scale, theme))
-      .then(() => live && setFaceEpoch((n) => n + 1))
+      .load(font)
+      .then(() => {
+        if (live && !loaded) setFaceEpoch((n) => n + 1);
+      })
       .catch(() => {});
     return () => {
       live = false;
@@ -121,7 +125,7 @@ export function useFolio() {
       const spread = params.get("spread");
       openSample(spread == null ? undefined : Number(spread));
     } else {
-      void preparePress();
+      void pressing.preparePress();
     }
     return () => media.removeEventListener("change", apply);
     // The query param is read once, on purpose.
@@ -208,21 +212,29 @@ export function useFolio() {
     if (!book || book.sample || !client) return;
     for (const chapter of book.chapters) {
       if (!chapter.diffStale || diffTimers.current.has(chapter.id)) continue;
-      const timer = window.setTimeout(() => {
+      const fetchDiff = (tries: number) => {
         const latest = bookRef.current?.chapters.find((item) => item.id === chapter.id);
         if (!latest) {
           diffTimers.current.delete(chapter.id);
           return;
         }
-        turnDiff(client, latest)
+        // The turn whose finished step made the diff stale, else the chapter's latest.
+        const turn = stream.staleTurn(latest) ?? lastInkId(latest);
+        // A turn the press has not named yet cannot be asked about; wait for its name a while.
+        if (isLocalId(turn) && tries < DIFF_WAIT_TRIES) {
+          diffTimers.current.set(chapter.id, window.setTimeout(() => fetchDiff(tries + 1), DIFF_WAIT_MS));
+          return;
+        }
+        stream.clearStaleTurn(chapter.id);
+        turnDiff(client, latest, turn)
           // An empty diff still marks the chapter fresh, so a failure is not retried in a loop.
           .catch(() => ({ type: "folio.diff", data: { sessionID: chapter.id, diff: [] } }))
           .then((frame) => {
             diffTimers.current.delete(chapter.id);
-            setBook((current) => (current && !current.sample ? applyEvent(current, frame) : current));
+            editBook((current) => (current && !current.sample ? applyEvent(current, frame) : current));
           });
-      }, 300);
-      diffTimers.current.set(chapter.id, timer);
+      };
+      diffTimers.current.set(chapter.id, window.setTimeout(() => fetchDiff(0), DIFF_WAIT_MS));
     }
   }, [book]);
 
@@ -265,7 +277,7 @@ export function useFolio() {
 
   function openSample(spread?: number) {
     // The press stays attached; only the book's stream stops.
-    abortRef.current?.abort();
+    stream.stop();
     stopStream();
     const next = sampleBook();
     setBook(next);
@@ -314,15 +326,16 @@ export function useFolio() {
       setNotice("This copy of Folio is not licensed.");
       return;
     }
-    abortRef.current?.abort();
+    stream.stop();
     stopStream();
     try {
-      const next = withKeptPlates(await loadBook(client, folder, { askBeforeWrite, model }));
+      const said: string[] = [];
+      const next = withKeptPlates(await loadBook(client, folder, { askBeforeWrite, model, onNotice: (n) => said.push(n) }));
       // Providers, models and keys are asked about for this book from now on.
       client.useDirectory(folder);
       // Errors already in the history are old news.
       seenErrors.current = new Map(next.chapters.flatMap((c) => (c.error ? [[c.id, c.error] as const] : [])));
-      listen(client);
+      stream.listen(client);
       setBook(ensureFirstPage(next));
       setDrafts({});
       setEngineState("ready");
@@ -330,103 +343,15 @@ export function useFolio() {
       const last = next.chapters[next.chapters.length - 1];
       setJumpTo(last?.id ?? null);
       setNav(initialNav(0));
-      setNotice(null);
+      setNotice(said[said.length - 1] ?? null);
     } catch (error) {
       setEngineState("error");
       setNotice(messageOf(error, "Folio could not open that folder with the press."));
     }
   }
 
-  /** Listen to the press's stream for the open book, in place of any earlier stream. */
-  function listen(client: EngineClient): AbortSignal {
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    pausedRef.current = false;
-    // Many deltas arrive per frame; set them in type together, in order.
-    const events = coalesce<EventFrame>((batch) => {
-      // A resync reading the history applies these again to the chapters it brings back.
-      if (resyncRef.current?.signal === ctrl.signal) resyncRef.current.frames.push(...batch);
-      setBook((current) => {
-        if (!current || current.sample) return current;
-        return batch.reduce((book, frame) => applyEvent(book, frame), current);
-      });
-    });
-    ctrl.signal.addEventListener("abort", () => events.cancel());
-    client.subscribe((frame) => {
-      if (frame.type === "folio.stream-paused") {
-        pausedRef.current = true;
-        setNotice("The event stream paused. Folio will listen again.");
-      } else if (frame.type === "folio.stream-resumed") {
-        pausedRef.current = false;
-        setNotice(null);
-        void resync(client, ctrl.signal);
-      } else if (frame.type === "folio.stream-failing") {
-        void restartPress();
-      } else {
-        events.push(frame);
-      }
-    }, ctrl.signal);
-    return ctrl.signal;
-  }
-
-  /** The stream has no replay; after an outage, set the chapters again from history. */
-  async function resync(client: EngineClient, signal: AbortSignal) {
-    const running = resyncRef.current;
-    if (running && !running.signal.aborted) {
-      running.again = true;
-      return;
-    }
-    const run = { frames: [] as EventFrame[], again: false, signal };
-    resyncRef.current = run;
-    try {
-      const snapshot = bookRef.current;
-      if (!snapshot || snapshot.sample) return;
-      const fresh = withKeptPlates(await refreshBook(client, snapshot));
-      if (signal.aborted) return;
-      const frames = run.frames.slice();
-      setBook((current) => (current && !current.sample && current.id === fresh.id ? mergeResync(current, fresh, frames) : current));
-    } catch {
-      // The next outage or turn will try again.
-    } finally {
-      if (resyncRef.current === run) resyncRef.current = null;
-      if (run.again && !signal.aborted) void resync(client, signal);
-    }
-  }
-
-  /**
-   * The stream keeps failing, or a call found nothing answering while it was
-   * paused: the press may have died. Reach it again (the host starts a new one,
-   * with a new port and password), listen with the new client, and resync.
-   * If that fails, the old stream goes on trying and asks again later.
-   */
-  async function restartPress() {
-    if (restartingRef.current) return;
-    restartingRef.current = true;
-    try {
-      const client = await reattachPress(pressHost(), targetRef.current);
-      client.onUnreachable = whenUnreachable;
-      clientRef.current = client;
-      const current = bookRef.current;
-      if (current && !current.sample) {
-        client.useDirectory(current.directory);
-        const signal = listen(client);
-        void resync(client, signal);
-      }
-      setNotice(null);
-    } catch {
-      setNotice("The press is not answering. Folio will keep trying.");
-    } finally {
-      restartingRef.current = false;
-    }
-  }
-
-  function whenUnreachable() {
-    if (pausedRef.current) void restartPress();
-  }
-
   function updateChapter(id: string, edit: (chapter: Chapter) => Chapter) {
-    setBook((current) => {
+    editBook((current) => {
       if (!current) return current;
       return { ...current, chapters: current.chapters.map((chapter) => (chapter.id === id ? edit(chapter) : chapter)) };
     });
@@ -483,7 +408,15 @@ export function useFolio() {
     }
     try {
       const id = await client.prompt(chapterId, text);
-      if (localId) updateChapter(chapterId, (current) => renameBlock(current, localId, id));
+      if (localId) {
+        // renameBlock also renames the turn's diff plates (diff-<file>@local-… → @<id>); the plate store
+        // saves them under the new id on the next book change, and an open plate follows its new id.
+        updateChapter(chapterId, (current) => renameBlock(current, localId, id));
+        setNav((current) => {
+          const open = current.plateOpen;
+          return open?.endsWith(`@${localId}`) ? { ...current, plateOpen: `${open.slice(0, -localId.length)}${id}` } : current;
+        });
+      }
       return id;
     } catch (error) {
       setNotice(messageOf(error, failure));
@@ -575,7 +508,7 @@ export function useFolio() {
         busy: false,
       };
       // A second quick turn sees the book this one already grew, and adds nothing.
-      setBook((current) =>
+      editBook((current) =>
         current && current.chapters.length === book.chapters.length ? { ...current, chapters: [...current.chapters, chapter] } : current,
       );
       setJumpTo(id);
@@ -584,8 +517,8 @@ export function useFolio() {
     const client = clientRef.current;
     if (!client) return;
     try {
-      const created = await openChapter(client, book.directory, { askBeforeWrite, model });
-      setBook((current) =>
+      const created = await openChapter(client, book.directory, { askBeforeWrite, model, onNotice: setNotice });
+      editBook((current) =>
         current
           ? applyEvent(current, {
               type: "session.created",
@@ -605,7 +538,7 @@ export function useFolio() {
   }
 
   function mutatePlate(id: string, edit: (plate: Plate) => Plate) {
-    setBook((current) => {
+    editBook((current) => {
       if (!current) return current;
       return {
         ...current,
@@ -617,18 +550,30 @@ export function useFolio() {
     });
   }
 
+  /**
+   * Undo a plate's change. The plate is "reverting" while the write is in
+   * flight, and takes no other answer; it lands "reverted", or "open" again
+   * with a sentence saying why not.
+   */
   async function rejectPlate(id: string) {
-    const found = findPlate(book, id);
-    if (!found) return;
+    const found = book ? findPlate(book, id) : null;
+    if (!found || found.plate.status === "reverting") return;
     if (book && !book.sample) {
       const client = clientRef.current;
-      if (!client) return;
+      if (!client) {
+        setNotice("The press is not answering, so the change was left as it is.");
+        return;
+      }
+      const was = found.plate.status;
+      mutatePlate(id, (plate) => ({ ...plate, status: "reverting" }));
       try {
-        const frame = await revertPlate(client, book, found.chapter, found.plate);
+        const said: string[] = [];
+        const frame = await revertPlate(client, book, found.chapter, found.plate, { onNotice: (n) => said.push(n) });
         mutatePlate(id, (plate) => ({ ...plate, status: "reverted", folded: true }));
-        setBook((current) => (current ? applyEvent(current, frame) : current));
-        setNotice(createsFile(found.plate) ? "The new file was taken away." : "The file was restored.");
+        editBook((current) => (current ? applyEvent(current, frame) : current));
+        setNotice(said[0] ?? (createsFile(found.plate) ? "The new file was taken away." : "The file was restored."));
       } catch (error) {
+        mutatePlate(id, (plate) => (plate.status === "reverting" ? { ...plate, status: was === "accepted" ? "accepted" : "open" } : plate));
         setNotice(messageOf(error, "The press could not undo the change."));
       }
       return;
@@ -649,7 +594,7 @@ export function useFolio() {
     const current = bookRef.current;
     if (!client || !current || current.sample) return;
     const { done, failed } = await applyAskRules(client, current.chapters.map((c) => c.id), on);
-    setBook((latest) =>
+    editBook((latest) =>
       latest && latest.id === current.id
         ? { ...latest, chapters: latest.chapters.map((c) => (done.includes(c.id) ? { ...c, askRules: on } : c)) }
         : latest,
@@ -660,7 +605,7 @@ export function useFolio() {
   /** The press's client, or a notice saying it is not attached (the question stays where it is). */
   function attached(): EngineClient | null {
     const client = clientRef.current;
-    if (!client) setNotice("The press is not attached.");
+    if (!client) setNotice(NOT_ANSWERING);
     return client;
   }
 
@@ -709,15 +654,9 @@ export function useFolio() {
 
   /** Use this model for the chapter in view, and for chapters opened from now on. */
   async function chooseModel(choice: ModelRef) {
-    setModel(choice);
-    saveChosenModel(choice);
+    pressing.pickModel(choice);
     setMenuOpen(false);
     if (notice === MODEL_GONE) setNotice(null);
-    setPress((current) =>
-      current.phase === "ready"
-        ? { ...current, summary: pressSummary(current.version, providersRef.current, choice), note: undefined }
-        : current,
-    );
     const chapter = chapterForSpread(nav.spread);
     if (!chapter || !book || book.sample) return;
     try {
@@ -748,92 +687,11 @@ export function useFolio() {
     setDrafts((prev) => ({ ...prev, [id]: value }));
   }
 
-  /** Find the press, start or attach to it, and say on the title page what it will write with. */
-  async function preparePress(target?: AttachTarget) {
-    setPress({ phase: "checking" });
-    try {
-      const license = await uncheckedLicense.check();
-      if (licenseBlocks(license)) {
-        setPress({ phase: "error", message: "This copy of Folio is not licensed." });
-        return;
-      }
-      const opened = await openPress(pressHost(), target, loadChosenModel());
-      targetRef.current = target;
-      if (opened.client) opened.client.onUnreachable = whenUnreachable;
-      clientRef.current = opened.client;
-      providersRef.current = opened.providers;
-      setProviders(opened.providers);
-      setModels(opened.models);
-      setModel(opened.model);
-      setEngineState(opened.client ? "ready" : "off");
-      setEngineVersion(opened.version ?? null);
-      setPress(opened.phase);
-    } catch (error) {
-      clientRef.current = null;
-      setEngineState("error");
-      setPress({ phase: "error", message: messageOf(error, "The press could not be reached.") });
-    }
-  }
-
-  async function installPress() {
-    setPress({ phase: "installing" });
-    try {
-      const result = await pressHost().install();
-      if (!result.ok) {
-        setPress({ phase: "missing", detail: result.error ?? "The installer did not finish." });
-        return;
-      }
-      await preparePress();
-    } catch (error) {
-      setPress({ phase: "missing", detail: messageOf(error, "The installer did not finish.") });
-    }
-  }
-
-  /** Store a provider key with the press, then name the press's model again. */
-  async function saveProviderKey() {
-    const client = clientRef.current;
-    if (!providerKey.trim() || !client) return;
-    setSavingKey(true);
-    try {
-      await client.connectKey(providerId, providerKey.trim(), "Folio");
-      setProviderKey("");
-      const [providers, list, fallback] = await Promise.all([
-        client.providers().catch(() => providersRef.current),
-        client.models().catch(() => [] as ModelInfo[]),
-        client.defaultModel().catch(() => null),
-      ]);
-      providersRef.current = providers;
-      setProviders(providers);
-      setModels(offeredModels(list));
-      const chosen = model ?? (fallback ? { providerID: fallback.providerID, id: fallback.id } : null);
-      setPress((current) =>
-        current.phase === "ready"
-          ? { phase: "ready", version: current.version, summary: pressSummary(current.version, providers, chosen) }
-          : current,
-      );
-    } catch (error) {
-      setNotice(messageOf(error, "The key was not accepted."));
-    } finally {
-      setSavingKey(false);
-    }
-  }
-
   /** Open the key form on the title page. It is never required; the free provider works without one. */
   async function showProviderForm() {
     setMenuOpen(false);
     setNav((current) => ({ ...current, view: "desk" }));
-    const client = clientRef.current;
-    if (!client) {
-      setNotice("The press is not ready yet.");
-      return;
-    }
-    const list = keyProviders(await client.integrations().catch(() => []));
-    if (!list.length) {
-      setNotice("The press offers no providers that take a key.");
-      return;
-    }
-    if (!list.some((item) => item.id === providerId)) setProviderId(list[0].id);
-    setPress((current) => (current.phase === "ready" ? { ...current, providers: list } : current));
+    await pressing.showProviderForm();
   }
 
   const activeId = chapterForSpread(nav.spread)?.id;
@@ -897,15 +755,15 @@ export function useFolio() {
     place,
     pathDraft,
     setPathDraft,
-    passwordDraft,
-    setPasswordDraft,
-    pressUrlDraft,
-    setPressUrlDraft,
-    attachPress: () => void preparePress({ url: pressUrlDraft.trim(), password: passwordDraft }),
+    passwordDraft: pressing.passwordDraft,
+    setPasswordDraft: pressing.setPasswordDraft,
+    pressUrlDraft: pressing.pressUrlDraft,
+    setPressUrlDraft: pressing.setPressUrlDraft,
+    attachPress: () => void pressing.preparePress({ url: pressing.pressUrlDraft.trim(), password: pressing.passwordDraft }),
     showPath,
     reduced,
     openSample: () => openSample(),
-    preparePress: () => void preparePress(),
+    preparePress: () => void pressing.preparePress(),
     models,
     model,
     modelLabel: model ? (models.find((m) => m.providerID === model.providerID && m.id === model.id)?.name ?? model.id) : null,
@@ -917,16 +775,16 @@ export function useFolio() {
       setModelsOpen(true);
     },
     chooseModel: (choice: ModelRef) => void chooseModel(choice),
-    installPress,
-    saveProviderKey,
+    installPress: pressing.installPress,
+    saveProviderKey: pressing.saveProviderKey,
     showProviderForm,
-    hideProviderForm: () => setPress((current) => (current.phase === "ready" ? { ...current, providers: undefined } : current)),
+    hideProviderForm: pressing.hideProviderForm,
     press,
-    providerId,
-    setProviderId,
-    providerKey,
-    setProviderKey,
-    savingKey,
+    providerId: pressing.providerId,
+    setProviderId: pressing.setProviderId,
+    providerKey: pressing.providerKey,
+    setProviderKey: pressing.setProviderKey,
+    savingKey: pressing.savingKey,
     beginOpenFolder,
     connectPath: () => void connect(pathDraft),
     sendQuill,
@@ -960,10 +818,10 @@ export function useFolio() {
     openPlate: (id: string) => setNav(reduceNav(nav, { type: "open-plate", id }).nav),
     foldOpenPlate: () => setNav(reduceNav(nav, { type: "fold-plate" }).nav),
     foldPlate: (id: string) => mutatePlate(id, (plate) => ({ ...plate, folded: !plate.folded })),
-    acceptPlate: (id: string) => mutatePlate(id, (plate) => ({ ...plate, status: "accepted" })),
+    acceptPlate: (id: string) => mutatePlate(id, (plate) => (plate.status === "reverting" ? plate : { ...plate, status: "accepted" })),
     rejectPlate: (id: string) => void rejectPlate(id),
     revisePlate: (id: string) => {
-      const found = findPlate(book, id);
+      const found = book ? findPlate(book, id) : null;
       if (!found) return;
       putDraft(found.chapter.id, `Revise the change in ${found.plate.file}. `);
       setNav((current) => ({ ...current, margin: false }));
@@ -996,14 +854,6 @@ export function useFolio() {
   };
 }
 
-function findPlate(book: Book | null, id: string): { chapter: Chapter; plate: Plate } | null {
-  if (!book) return null;
-  for (const chapter of book.chapters) {
-    const plate = chapter.plates.find((item) => item.id === id);
-    if (plate) return { chapter, plate };
-  }
-  return null;
-}
 
 let canvas: HTMLCanvasElement | null = null;
 function measureCanvas(): HTMLCanvasElement {

@@ -57,4 +57,30 @@ describe("coalesce", () => {
     expect(flush).toHaveBeenCalledTimes(1);
     expect(flush).toHaveBeenCalledWith(["a", "b"]);
   });
+
+  it("hands over what is waiting at once on flush, and the scheduled run then finds nothing", () => {
+    const frames = manualFrames();
+    const flushes: string[][] = [];
+    const queue = coalesce<string>((batch) => flushes.push(batch), frames.schedule);
+    queue.push("a");
+    queue.push("b");
+    queue.flush();
+    expect(flushes).toEqual([["a", "b"]]);
+    frames.tick();
+    expect(flushes).toEqual([["a", "b"]]);
+    queue.flush();
+    expect(flushes).toEqual([["a", "b"]]);
+  });
+
+  it("keeps a local change after the events that arrived before it", () => {
+    const frames = manualFrames();
+    const order: string[] = [];
+    const queue = coalesce<string>((batch) => order.push(...batch), frames.schedule);
+    queue.push("event 1");
+    queue.push("event 2");
+    queue.after(() => order.push("local"));
+    queue.push("event 3");
+    frames.tick();
+    expect(order).toEqual(["event 1", "event 2", "local", "event 3"]);
+  });
 });

@@ -85,9 +85,11 @@ export function plateShown(nav: Nav, plateIds: string[]): string | null {
 }
 
 /**
- * While the press writes, carry the reader onto the next spread only when they
- * were on the last spread of the chapter that grew and the new spread is that
- * chapter's. `before` and `after` hold one chapter id per laid page.
+ * While the press writes, carry the reader on to the chapter's last spread only
+ * when they were on the last spread of the chapter that grew and it now reaches
+ * further. A chapter that grew by several spreads in one layout is followed to
+ * its end, not one spread at a time. `before` and `after` hold one chapter id
+ * per laid page.
  */
 export function followTail(before: string[], after: string[], spread: number): number | null {
   const chapterId = before[spread * 2];
@@ -95,5 +97,6 @@ export function followTail(before: string[], after: string[], spread: number): n
   if (Math.floor(before.lastIndexOf(chapterId) / 2) !== spread) return null;
   const pagesOf = (pages: string[]) => pages.filter((id) => id === chapterId).length;
   if (pagesOf(after) <= pagesOf(before)) return null;
-  return after[(spread + 1) * 2] === chapterId ? spread + 1 : null;
+  const last = Math.floor(after.lastIndexOf(chapterId) / 2);
+  return last > spread ? last : null;
 }

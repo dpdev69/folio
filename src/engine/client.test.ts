@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startReplay, type Replay } from "../../scripts/replay-press.mjs";
+import { REPLAY_DIRECTORY, startReplay, type Replay } from "../../scripts/replay-press.mjs";
 import { applyEvent } from "../book/events";
 import type { Book } from "../book/model";
 import { chapterFromMessages } from "../book/transcript";
 import { EngineClient, EngineError } from "./client";
 import { backoffDelay, watchdog, type EventFrame } from "./sse";
 
-const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
+const DIRECTORY = REPLAY_DIRECTORY;
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
 
 let replay: Replay | undefined;
@@ -98,7 +98,10 @@ describe("EngineClient against the replay press", () => {
     expect(frames.some((f) => f.type === "session.tool.input.started")).toBe(true);
     // Frames reach the reducer as {type, data, location?}, nothing more.
     for (const frame of frames) expect(Object.keys(frame).every((k) => ["type", "data", "location"].includes(k))).toBe(true);
-    const empty: Book = { id: DIRECTORY, title: "repo", directory: DIRECTORY, sample: false, chapters: [] };
+    // The recorded stream names the folder it was recorded in; the book is opened there.
+    const recorded = frames.find((f) => f.type === "session.created")?.location?.directory;
+    const directory = typeof recorded === "string" ? recorded : DIRECTORY;
+    const empty: Book = { id: directory, title: "repo", directory, sample: false, chapters: [] };
     const book = frames.reduce(applyEvent, empty);
     const chapter = book.chapters[0];
     expect(chapter.blocks.some((b) => b.text.startsWith("Added a `farewell(name)`"))).toBe(true);
@@ -108,14 +111,15 @@ describe("EngineClient against the replay press", () => {
 
   it("reconnects after the stream drops, pausing once and resuming", async () => {
     const { url } = await press({ flaky: true });
-    const client = new EngineClient(url, { password: "pw", stream: { retryDelay: () => 10 } });
+    const client = new EngineClient(url, { password: "pw", stream: { retryDelay: () => 10, steadyMs: 50 } });
     const frames = listen(client);
-    await until(() => frames.filter((f) => f.type === "server.connected").length === 2);
+    await until(() => frames.some((f) => f.type === "folio.stream-resumed"));
+    // The return is announced once the new connection has held, not the moment it opens.
     expect(frames.map((f) => f.type)).toEqual([
       "server.connected",
       "folio.stream-paused",
-      "folio.stream-resumed",
       "server.connected",
+      "folio.stream-resumed",
     ]);
     expect(frames[1].data?.message).toBeTruthy();
   });
@@ -132,6 +136,62 @@ describe("EngineClient against the replay press", () => {
     expect(frames.filter((f) => f.type === "folio.stream-paused").length).toBe(1);
     // The first failing frame comes after the pause and three failed reconnects.
     expect(frames.findIndex((f) => f.type === "folio.stream-paused")).toBeLessThan(frames.indexOf(failing[0]));
+  });
+
+  it("keeps backing off when every connection opens and drops at once, without announcing a return", async () => {
+    vi.useFakeTimers();
+    let opened = 0;
+    const encoder = new TextEncoder();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        opened += 1;
+        const body = new ReadableStream<Uint8Array>({
+          start(ctrl) {
+            ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "server.connected", data: {} })}\n\n`));
+            ctrl.close();
+          },
+        });
+        return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+      }),
+    );
+    try {
+      const delays: number[] = [];
+      const client = new EngineClient("http://press", {
+        password: "pw",
+        stream: { retryDelay: (attempt) => (delays.push(attempt), 100), steadyMs: 2000 },
+      });
+      const steady = vi.fn();
+      client.onSteady = steady;
+      const frames = listen(client);
+      for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(100);
+      expect(opened).toBeGreaterThanOrEqual(6);
+      // Each drop counts as one more failed reconnect: the attempts climb and are never reset.
+      expect(delays.slice(0, 6)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(frames.filter((f) => f.type === "folio.stream-paused")).toHaveLength(1);
+      expect(frames.some((f) => f.type === "folio.stream-resumed")).toBe(false);
+      expect(frames.filter((f) => f.type === "folio.stream-failing").length).toBeGreaterThanOrEqual(1);
+      expect(steady).not.toHaveBeenCalled();
+    } finally {
+      for (const ctrl of aborts.splice(0)) ctrl.abort();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("counts a connection as made once it brings a real event, and tells its owner", async () => {
+    const { url } = await press({ flaky: true });
+    const client = new EngineClient(url, { password: "pw", stream: { retryDelay: () => 10, steadyMs: 60_000 } });
+    const steady = vi.fn();
+    client.onSteady = steady;
+    const frames = listen(client);
+    await until(() => frames.filter((f) => f.type === "server.connected").length === 2);
+    expect(steady).not.toHaveBeenCalled();
+    await client.prompt(SESSION, "Add a farewell");
+    await until(() => frames.some((f) => f.type === "folio.stream-resumed"));
+    expect(steady).toHaveBeenCalledTimes(1);
+    const resumed = frames.findIndex((f) => f.type === "folio.stream-resumed");
+    expect(frames[resumed + 1]?.type).not.toBe("server.connected");
   });
 
   it("tells its owner when a request finds nothing answering", async () => {
@@ -233,16 +293,24 @@ describe("EngineClient against the replay press", () => {
     ]);
   });
 
-  it("reads files from the press and writes through the host when the press cannot", async () => {
+  it("reads files from the press, and writes through Folio's host before the press's route", async () => {
     const { url, requests } = await press();
     const writeFile = vi.fn(async () => {});
     const client = new EngineClient(url, { password: "pw", host: { writeFile } });
     expect(await client.readFile("/book", "src/greet.ts")).toContain("greet");
     expect(requests.at(-1)).toMatchObject({ path: "/api/fs/read/src/greet.ts", query: { "location[directory]": "/book" } });
+    const before = requests.length;
     await client.writeFile("/book", "src/greet.ts", "new text\n");
+    expect(writeFile).toHaveBeenCalledWith("/book", "src/greet.ts", "new text\n");
+    expect(requests.length).toBe(before);
+  });
+
+  it("writes through the press's route only when there is no host write", async () => {
+    const { url, requests } = await press();
+    const client = new EngineClient(url, { password: "pw" });
+    await expect(client.writeFile("/book", "src/greet.ts", "new text\n")).rejects.toMatchObject({ status: 404 });
     expect(requests.at(-1)).toMatchObject({ method: "POST", path: "/api/experimental/fs/write", body: "new text\n" });
     expect(requests.at(-1)?.query).toEqual({ "location[directory]": "/book", path: "src/greet.ts" });
-    expect(writeFile).toHaveBeenCalledWith("/book", "src/greet.ts", "new text\n");
   });
 
   it("maps failures to calm sentences", async () => {

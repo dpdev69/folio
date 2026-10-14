@@ -152,4 +152,32 @@ describe("the plate store", () => {
       ["diff-src/greet.ts@msg_u1", "reverted", true],
     ]);
   });
+
+  it("saves a plate whose Reject is still in flight as open, and never reads back 'reverting'", () => {
+    const storage = memory();
+    save("ses_1", [plate("p", "reverting", true)], storage);
+    expect(load("ses_1", storage)).toEqual({ p: { status: "open", folded: true } });
+    storage.data.set("folio.plates.ses_2", JSON.stringify({ q: { status: "reverting", folded: false } }));
+    expect(load("ses_2", storage)).toEqual({});
+  });
+
+  it("still holds to the cap when the index was garbled and sessions were kept outside it", () => {
+    const data = new Map<string, string>();
+    const storage: PlateStorage = {
+      getItem: (key) => data.get(key) ?? null,
+      setItem: (key, value) => void data.set(key, value),
+      removeItem: (key) => void data.delete(key),
+      key: (i) => [...data.keys()][i] ?? null,
+      get length() {
+        return data.size;
+      },
+    };
+    for (let i = 0; i < PLATE_SESSIONS; i++) save(`ses_${i}`, [plate("p", "accepted")], storage);
+    data.set("folio.plates.index", "{garbled");
+    for (let i = 0; i < 5; i++) save(`ses_new${i}`, [plate("p", "accepted")], storage);
+    const kept = [...data.keys()].filter((key) => key !== "folio.plates.index");
+    expect(kept).toHaveLength(PLATE_SESSIONS);
+    expect(load("ses_new4", storage)).toEqual({ p: { status: "accepted", folded: false } });
+    expect(JSON.parse(data.get("folio.plates.index")!)).toHaveLength(PLATE_SESSIONS);
+  });
 });

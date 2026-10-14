@@ -1,4 +1,5 @@
 import type { Book, Chapter, Plate } from "../book/model";
+import { browserStorage, type KeyStore } from "./storage";
 
 /**
  * What the reader decided about each plate, kept per session in localStorage
@@ -7,22 +8,15 @@ import type { Book, Chapter, Plate } from "../book/model";
  */
 export type PlateState = Record<string, { status: Plate["status"]; folded: boolean }>;
 
-export type PlateStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+export type PlateStorage = KeyStore;
 
 /** Sessions kept; saving one more forgets the one saved longest ago. */
 export const PLATE_SESSIONS = 200;
 
 const PREFIX = "folio.plates.";
 const INDEX = `${PREFIX}index`;
+/** What is kept. "reverting" is a Reject in flight: a reload finds the plate open again. */
 const STATUSES: Plate["status"][] = ["open", "accepted", "reverted"];
-
-function browserStorage(): PlateStorage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
-}
 
 export function load(sessionId: string, storage: PlateStorage | null = browserStorage()): PlateState {
   try {
@@ -38,7 +32,10 @@ export function save(sessionId: string, plates: Plate[], storage: PlateStorage |
   if (!storage) return;
   try {
     storage.setItem(PREFIX + sessionId, JSON.stringify(mergeState(load(sessionId, storage), plates)));
-    const order = readIndex(storage).filter((id) => id !== sessionId);
+    // Sessions kept under the prefix but missing from the index (an index that was garbled or
+    // lost) go first, as the oldest, so the cap still reaches them.
+    const index = readIndex(storage);
+    const order = [...strays(storage, index), ...index].filter((id) => id !== sessionId);
     order.push(sessionId);
     while (order.length > PLATE_SESSIONS) storage.removeItem(PREFIX + order.shift()!);
     storage.setItem(INDEX, JSON.stringify(order));
@@ -49,7 +46,7 @@ export function save(sessionId: string, plates: Plate[], storage: PlateStorage |
 
 export function mergeState(kept: PlateState, plates: Plate[]): PlateState {
   const next: PlateState = { ...kept };
-  for (const plate of plates) next[plate.id] = { status: plate.status, folded: plate.folded };
+  for (const plate of plates) next[plate.id] = { status: plate.status === "reverting" ? "open" : plate.status, folded: plate.folded };
   return next;
 }
 
@@ -84,6 +81,24 @@ function readIndex(storage: PlateStorage): string[] {
   } catch {
     return [];
   }
+}
+
+/** Session ids stored under the prefix that the index does not hold, where storage can list its keys. */
+function strays(storage: PlateStorage, index: string[]): string[] {
+  if (typeof storage.key !== "function" || typeof storage.length !== "number") return [];
+  const known = new Set(index);
+  const found: string[] = [];
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (!key || !key.startsWith(PREFIX) || key === INDEX) continue;
+      const id = key.slice(PREFIX.length);
+      if (!known.has(id)) found.push(id);
+    }
+  } catch {
+    return [];
+  }
+  return found;
 }
 
 function clean(raw: unknown): PlateState {
