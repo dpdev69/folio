@@ -89,14 +89,64 @@ export function plateShown(nav: Nav, plateIds: string[]): string | null {
  * when they were on the last spread of the chapter that grew and it now reaches
  * further. A chapter that grew by several spreads in one layout is followed to
  * its end, not one spread at a time. `before` and `after` hold one chapter id
- * per laid page.
+ * per laid page; `filledBefore` and `filledAfter` say which pages hold lines or
+ * footnotes. Only those count as the chapter's reach, so the blank spread the
+ * quill waits on after a full right page does not turn the reader early.
  */
-export function followTail(before: string[], after: string[], spread: number): number | null {
+export function followTail(
+  before: string[],
+  after: string[],
+  spread: number,
+  filledBefore: boolean[] = before.map(() => true),
+  filledAfter: boolean[] = after.map(() => true),
+): number | null {
   const chapterId = before[spread * 2];
   if (chapterId == null) return null;
-  if (Math.floor(before.lastIndexOf(chapterId) / 2) !== spread) return null;
-  const pagesOf = (pages: string[]) => pages.filter((id) => id === chapterId).length;
-  if (pagesOf(after) <= pagesOf(before)) return null;
-  const last = Math.floor(after.lastIndexOf(chapterId) / 2);
+  /** The chapter's last spread with something on it, or its last spread when none has. */
+  const reach = (ids: string[], filled: boolean[]) => {
+    let last = -1;
+    ids.forEach((id, index) => {
+      if (id === chapterId && filled[index]) last = index;
+    });
+    return Math.floor((last < 0 ? ids.lastIndexOf(chapterId) : last) / 2);
+  };
+  if (reach(before, filledBefore) !== spread) return null;
+  // The chapter itself grew: more of its pages hold something than before.
+  const count = (ids: string[], filled: boolean[]) => ids.filter((id, index) => id === chapterId && filled[index]).length;
+  if (count(after, filledAfter) <= count(before, filledBefore)) return null;
+  const last = reach(after, filledAfter);
   return last > spread ? last : null;
+}
+
+/** What `relocate` reads of a laid page. */
+export type AnchorPage = { chapterId: string; lines: { blockId: string; plainStart: number; gap?: boolean }[] };
+
+/**
+ * The spread to show after the whole book was laid again (a new window size,
+ * type size or face): the one that now holds the first line the reader had in
+ * front of them, found by its block and its offset in the block. A spread with
+ * no lines (the quill's blank spread, an empty chapter) keeps its place in its
+ * chapter: the chapter's first spread plus the same offset, no further than the
+ * chapter's last spread. Always inside the book.
+ */
+export function relocate(before: AnchorPage[], after: AnchorPage[], spread: number): number {
+  const last = Math.max(0, Math.ceil(after.length / 2) - 1);
+  const shown = [before[spread * 2], before[spread * 2 + 1]];
+  const anchor = shown.flatMap((page) => page?.lines ?? []).find((line) => !line.gap);
+  if (anchor) {
+    let found = -1;
+    after.forEach((page, index) => {
+      if (page.lines.some((line) => !line.gap && line.blockId === anchor.blockId && line.plainStart <= anchor.plainStart)) found = index;
+    });
+    if (found >= 0) return Math.min(last, Math.floor(found / 2));
+  }
+  const chapterId = shown[0]?.chapterId;
+  const startBefore = chapterId == null ? -1 : before.findIndex((page) => page.chapterId === chapterId);
+  const startAfter = chapterId == null ? -1 : after.findIndex((page) => page.chapterId === chapterId);
+  if (startBefore >= 0 && startAfter >= 0) {
+    const endAfter = after.map((page) => page.chapterId).lastIndexOf(chapterId!);
+    const offset = spread - Math.floor(startBefore / 2);
+    return Math.min(last, Math.floor(endAfter / 2), Math.floor(startAfter / 2) + Math.max(0, offset));
+  }
+  return Math.min(last, Math.max(0, spread));
 }

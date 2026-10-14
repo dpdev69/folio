@@ -34,6 +34,9 @@ Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the RE
 - A plate whose change is only part of a larger edit has no lines, so `PlatePage` still shows "The plate is still being set." above its caption; show the caption alone there.
 - The search card stays open after a jump to a hit; the appearance menu covers the Quiet and Paper swatches while it is open.
 - Reduced motion was checked by reading the CSS, not in a browser (the tools cannot emulate it).
+- A page always gets at least 6 prose lines, so on a very short window (under about 410px tall) the page counts room the sheet does not have, and a quill page there cannot fit its quill.
+- A chapter that is not the last and ends on a left page gets no quill, because `paginateBook` labels the blank right page beside it with the next chapter's id (older than the window-sized pages).
+- The CSS mirror test (`scripts/page-css.test.mjs`) does not cover `.line`'s height, and `RUNNING_LINE`, `FOLIO_LINE` and `HINT_LINE` are estimates of the face's normal line height that no CSS states.
 
 ## Docs
 

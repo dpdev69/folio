@@ -38,10 +38,28 @@ export function paginateChapter(
     /** Forced breaks, used by the sample so scenes match the mockups. */
     breaksBefore?: string[];
     /**
-     * Prose lines the page foot takes for these footnotes and `extra` one-line
-     * items (the slip that names a spread's plates). Without it the foot is free.
+     * Prose lines the page foot takes for these footnotes and `extra` slips (the
+     * slip that names a spread's plates, 0 or 1), each at its own height; may be
+     * fractional. Without it the foot is free.
      */
     footLines?: (notes: Footnote[], extra: number) => number;
+    /**
+     * Prose lines the quill block takes on the page that carries it: the right
+     * page of the chapter's last spread (BookView `isQuillPage`). When the
+     * chapter ends on a right page with no room left for it, a blank spread
+     * follows and the quill sits on its right page. May be fractional: the
+     * quill's height in prose lines, not rounded. 0 by default.
+     */
+    quillLines?: number;
+    /** Prose lines one wrapped line of the reader's ink takes (its type is taller); 1 by default. */
+    inkWeight?: number;
+    /**
+     * Prose lines the sheet physically holds, fractional; only the quill's check
+     * uses it, while lines are laid against `linesPerPage`. `linesPerPage` by default.
+     */
+    pageRoom?: number;
+    /** Prose lines the gap between paragraphs takes (styles.css draws it shorter than a line); 1 by default. */
+    gapWeight?: number;
   },
 ): LaidPage[] {
   const measure = opts.measure ?? charMeasure;
@@ -50,6 +68,15 @@ export function paginateChapter(
   const pages: LaidPage[] = [];
   let current: LaidPage = blank(chapter.id);
   let dropUsed = false;
+  const inkWeight = opts.inkWeight ?? 1;
+  const gapWeight = opts.gapWeight ?? 1;
+  /** Prose lines a laid line takes: ink is set larger than prose, a paragraph gap smaller. */
+  const weight = (line: Pick<LaidLine, "voice" | "gap">): number =>
+    line.gap ? gapWeight : line.voice === "ink" ? inkWeight : 1;
+  /** Prose lines these laid lines take. */
+  const used = (lines: LaidLine[]): number => lines.reduce((sum, line) => sum + weight(line), 0);
+  /** `a > b`, forgiving the float error of summed weights. */
+  const over = (a: number, b: number): boolean => a > b + 1e-9;
 
   const flush = () => {
     if (current.lines.length === 0 && current.footnotes.length === 0) return;
@@ -80,13 +107,13 @@ export function paginateChapter(
    * marks and at least its first footnote.
    */
   const spill = () => {
-    while (current.footnotes.length > 1 && current.lines.length + foot(current.footnotes) > opts.linesPerPage) {
-      const over: Footnote[] = [];
-      while (current.footnotes.length > 1 && current.lines.length + foot(current.footnotes) > opts.linesPerPage) {
-        over.unshift(current.footnotes.pop()!);
+    while (current.footnotes.length > 1 && over(used(current.lines) + foot(current.footnotes), opts.linesPerPage)) {
+      const spilt: Footnote[] = [];
+      while (current.footnotes.length > 1 && over(used(current.lines) + foot(current.footnotes), opts.linesPerPage)) {
+        spilt.unshift(current.footnotes.pop()!);
       }
       flush();
-      current.footnotes = over;
+      current.footnotes = spilt;
     }
   };
 
@@ -104,10 +131,10 @@ export function paginateChapter(
    * last lines, with the footnotes they hold, to a new page. Earlier pages stay.
    */
   const settle = () => {
-    while (current.lines.length > 1 && current.lines.length > room(current.footnotes)) {
+    while (current.lines.length > 1 && over(used(current.lines), room(current.footnotes))) {
       const carried: LaidLine[] = [];
       let kept = current.footnotes;
-      while (current.lines.length > 1 && current.lines.length > room(kept)) {
+      while (current.lines.length > 1 && over(used(current.lines), room(kept))) {
         carried.unshift(current.lines.pop()!);
         const staying = new Set(current.lines.flatMap((line) => line.notes));
         const leaving = new Set(carried.flatMap((line) => line.notes));
@@ -122,7 +149,7 @@ export function paginateChapter(
   };
 
   const pushGap = (blockId: string, voice: LaidLine["voice"]) => {
-    if (current.lines.length >= room(current.footnotes)) flush();
+    if (over(used(current.lines) + gapWeight, room(current.footnotes))) flush();
     current.lines.push({
       text: "",
       justify: false,
@@ -178,7 +205,7 @@ export function paginateChapter(
         ];
         // A line that brings a footnote needs room for both, or it starts the next page.
         const fresh = notes.filter((note) => !current.footnotes.some((f) => f.id === note.id));
-        if (current.lines.length >= room([...current.footnotes, ...fresh])) flush();
+        if (current.lines.length && over(used(current.lines) + weight(item), room([...current.footnotes, ...fresh]))) flush();
         const laid: LaidLine = {
           ...line,
           blockId: item.id,
@@ -213,7 +240,14 @@ export function paginateChapter(
     settle();
     spill();
   }
+  // The chapter's last right page carries the quill. One with no room left for it
+  // stays as laid, and the quill waits on a blank spread after it, so no page's
+  // lines depend on what follows them.
+  const right = pages.length % 2 === 1 && (current.lines.length > 0 || current.footnotes.length > 0);
+  const quill = opts.quillLines ?? 0;
+  const full = right && quill > 0 && over(used(current.lines) + foot(current.footnotes) + quill, opts.pageRoom ?? opts.linesPerPage);
   flush();
+  if (full) pages.push(blank(chapter.id), blank(chapter.id));
   return pages;
 }
 
@@ -236,6 +270,15 @@ export function paginateBook(
   }
   if (pages.length % 2 === 1) pages.push(blank(pages[pages.length - 1]?.chapterId ?? "end"));
   return { pages, chapterStart };
+}
+
+/**
+ * Whether the page at `index` opens its chapter, and so carries the chapter's
+ * title when it has no lines. A blank page later in the chapter (the spread
+ * the quill waits on) is only a blank page.
+ */
+export function opensChapter(index: number, chapterId: string, chapterStart: Record<string, number>): boolean {
+  return chapterStart[chapterId] === index;
 }
 
 /**

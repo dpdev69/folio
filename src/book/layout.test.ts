@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { committedPrefix, paginateChapter, type LaidLine, type LaidPage } from "./paginate";
+import { committedPrefix, opensChapter, paginateBook, paginateChapter, type LaidLine, type LaidPage } from "./paginate";
 import { sampleBook, SAMPLE_BREAKS } from "./sample";
 import { DROP_GAP, revealNextLine, wrapCacheSize, wrapParagraph, wrapParagraphCached } from "./wrap";
 import type { Book, Chapter, Footnote } from "./model";
@@ -421,5 +421,120 @@ describe("reasoning in a part still streaming", () => {
     }
     const tag = paginateChapter(chapter("<b> is bold"), opts).flatMap((page) => page.lines);
     expect(tag.map((l) => [l.drop, l.text])).toEqual([["<", "b> is bold"]]);
+  });
+});
+
+describe("the quill's room", () => {
+  const opts = { measure, width: 40, linesPerPage: 8, dropLines: 3, dropWidth: 4 };
+  const quill = { ...opts, quillLines: 3 };
+  const words = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(" ");
+  /** The fewest words whose plain pages match. */
+  function find(match: (pages: LaidPage[]) => boolean): string {
+    for (let n = 1; n < 400; n++) if (match(paginateChapter(chapter(words(n)), opts))) return words(n);
+    throw new Error("no such text");
+  }
+  const text = (pages: LaidPage[]) => pages.flatMap((page) => page.lines.map((line) => line.text));
+
+  it("gives a full last right page a blank spread after it, for the quill", () => {
+    const full = find((pages) => pages.length === 2 && pages[1].lines.length === 8);
+    const plain = paginateChapter(chapter(full), opts);
+    const laid = paginateChapter(chapter(full), quill);
+    expect(laid).toHaveLength(4);
+    expect(laid.slice(0, 2)).toEqual(plain);
+    for (const page of laid.slice(2)) expect(page).toEqual({ chapterId: "c", lines: [], footnotes: [] });
+    const book = paginateBook([chapter(full)], quill);
+    expect(book.pages).toHaveLength(4);
+  });
+
+  it("adds nothing when the chapter ends on a left page, whose blank right page takes the quill", () => {
+    const left = find((pages) => pages.length === 3 && pages[2].lines.length === 8);
+    expect(paginateChapter(chapter(left), quill)).toEqual(paginateChapter(chapter(left), opts));
+  });
+
+  it("adds nothing when the last right page has room for the quill", () => {
+    const roomy = find((pages) => pages.length === 2 && pages[1].lines.length === 8 - 3);
+    expect(paginateChapter(chapter(roomy), quill)).toEqual(paginateChapter(chapter(roomy), opts));
+  });
+
+  it("checks the quill against the sheet's unrounded room", () => {
+    const six = find((pages) => pages.length === 2 && pages[1].lines.length === 6);
+    // 6 lines and 2.5 of quill fit 8.9 lines of sheet, though not 8 whole ones.
+    expect(paginateChapter(chapter(six), { ...opts, quillLines: 2.5, pageRoom: 8.9 })).toHaveLength(2);
+    expect(paginateChapter(chapter(six), { ...opts, quillLines: 2.5 })).toHaveLength(4);
+  });
+
+  it("fills the quill's blank spread as the text goes on", () => {
+    const full = find((pages) => pages.length === 2 && pages[1].lines.length === 8);
+    const padded = paginateChapter(chapter(full), quill);
+    expect(padded).toHaveLength(4);
+    const more = paginateChapter(chapter(`${full}\n\nAnd then some more words.`), quill);
+    expect(more[0]).toEqual(padded[0]);
+    expect(more[1]).toEqual(padded[1]);
+    expect(more[2].lines.length).toBeGreaterThan(0);
+    // The chapter now ends on a left page, whose blank right page takes the quill.
+    expect(more).toHaveLength(3);
+  });
+
+  it("gives the chapter's title only to its first page, not to the quill's blank spread", () => {
+    const full = find((pages) => pages.length === 2 && pages[1].lines.length === 8);
+    const book = paginateBook([chapter(full)], quill);
+    expect(book.pages[2].lines).toEqual([]);
+    expect(opensChapter(0, "c", book.chapterStart)).toBe(true);
+    expect(opensChapter(2, "c", book.chapterStart)).toBe(false);
+  });
+
+  it("never moves a line laid earlier when the text grows", () => {
+    const full = find((pages) => pages.length === 2 && pages[1].lines.length >= 8 - 3 + 1);
+    const n = full.split(" ").length;
+    const two = (count: number) => `Opening words of the chapter here.\n\n${words(count)}`;
+    for (let cut = Math.max(1, n - 12); cut <= n + 12; cut++) {
+      const shorter = paginateChapter(chapter(two(cut)), quill);
+      const longer = paginateChapter(chapter(two(n + 40)), quill);
+      const lastPage = shorter.reduce((at, page, index) => (page.lines.length ? index : at), 0);
+      // Every page with lines (the blank spread the quill waits on holds none) stays where it is.
+      shorter.slice(0, lastPage + 1).forEach((page, index) => {
+        // The last line laid may still grow; every other line keeps its page and place.
+        const settled = index === lastPage ? page.lines.slice(0, -1) : page.lines;
+        expect(longer[index].lines.slice(0, settled.length)).toEqual(settled);
+        if (index < lastPage) expect(longer[index]).toEqual(page);
+      });
+    }
+  });
+
+  it("fits the footnotes, the slip and the quill beside the last right page's lines", () => {
+    const footLines = (notes: Footnote[], extra: number) => notes.length * 2 + extra;
+    const full = find((pages) => pages.length === 2 && pages[1].lines.length === 8);
+    const last = full.split(" ").length - 2;
+    const at = full.split(" ").slice(0, last).join(" ").length;
+    const note: Footnote = { id: "f", n: 1, blockId: "b", offset: at, text: "Edited a.", plateId: "plate-1" };
+    const laid = paginateChapter({ ...chapter(full), footnotes: [note] }, { ...quill, footLines });
+    laid.forEach((page, index) => {
+      const slip = index % 2 === 1 && [page, laid[index - 1]].some((p) => p?.footnotes.some((f) => f.plateId)) ? 1 : 0;
+      // The quill sits on the right page of the last spread.
+      const reserve = index === laid.length - 1 && index % 2 === 1 ? 3 : 0;
+      expect(page.lines.length + footLines(page.footnotes, slip) + reserve).toBeLessThanOrEqual(8);
+    });
+    expect(laid.flatMap((page) => page.footnotes.map((f) => f.n))).toEqual([1]);
+    expect(text(laid)).toEqual(text(paginateChapter(chapter(full), opts)));
+  });
+
+  it("counts a paragraph gap as the shorter line it is", () => {
+    const paragraphs = Array.from({ length: 6 }, (_, i) => `Short ${i}.`).join("\n\n");
+    const whole = paginateChapter(chapter(paragraphs), opts);
+    const light = paginateChapter(chapter(paragraphs), { ...opts, gapWeight: 0.55 });
+    // Six one-line paragraphs and five gaps: eleven whole lines, but 6 + 5 × 0.55 = 8.75 at the gaps' height.
+    expect(whole[0].lines).toHaveLength(8);
+    // Five paragraphs and five gaps weigh 7.75; the sixth paragraph would make 8.75.
+    expect(light[0].lines).toHaveLength(10);
+    expect(text(light)).toEqual(text(whole));
+  });
+
+  it("counts a line of the reader's ink as the taller line it is", () => {
+    const ink: Chapter = { ...chapter(""), blocks: [{ id: "i", voice: "ink", text: words(60) }] };
+    const plain = paginateChapter(ink, opts);
+    const weighed = paginateChapter(ink, { ...opts, inkWeight: 1.5 });
+    expect(plain[0].lines).toHaveLength(8);
+    expect(weighed[0].lines).toHaveLength(5);
+    expect(text(weighed)).toEqual(text(plain));
   });
 });

@@ -18,6 +18,7 @@ export function PageFace({
   number,
   side,
   quill,
+  opening = false,
   covered = false,
   draft,
   onDraft,
@@ -41,6 +42,8 @@ export function PageFace({
   number: number;
   side: "left" | "right";
   quill: boolean;
+  /** The page opens its chapter: with no lines yet it shows the chapter's title. */
+  opening?: boolean;
   /** Something lies over this page (a plate, the margin): it stays set but takes no input. */
   covered?: boolean;
   draft: string;
@@ -89,7 +92,7 @@ export function PageFace({
           if (text.length > 1) onSelect(text);
         }}
       >
-        {empty && side === "left" ? (
+        {empty && side === "left" && opening ? (
           <div className="opening">
             <p className="opening-kicker">Chapter {roman}</p>
             <h2>{chapter?.untitled ? "Untitled, in progress" : displayTitle(chapter ?? fallbackChapter(page.chapterId))}</h2>

@@ -80,6 +80,7 @@ npm run fetch-press -- --dest /some/folder
 
 - Turning inside a chapter moves through its pages. Turning forward past the last page of the last chapter starts a new chapter. Streaming that fills a page turns forward on its own.
 - The curl is about 450 ms: the leaf lifts a few pixels, swings on a long perspective so it never grows past the book, and casts a shadow on the page it uncovers; the back turn is its mirror. Lines and footnotes settle in as they are laid, a plate is laid over the page and lifted off it, the margin slides in from the gutter, and the menus pop from their buttons. Reduced motion (the system setting) turns all of it into short fades.
+- The book takes the window's height (a sheet is never more than about 1.55 times as tall as it is wide), and a page holds as many lines as its sheet has room for. The quill keeps its room on its own page, the right page of a chapter's last spread; when that page has no room left for it, the quill waits on the next spread.
 - The quill is the lined field at the foot of the page. Press Return twice to send; a single Return makes a new line.
 - Highlight a passage to write in the margin. The highlighted text is the context. The reply sits next to the note, and can replace the passage.
 - Tool calls are footnotes. A footnote that made a change ends with a link, "See Plate N", which opens that plate.

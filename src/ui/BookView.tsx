@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Chapter, PermissionAsk, Plate } from "../book/model";
 import { findPlate, toRoman } from "../book/model";
-import type { LaidPage } from "../book/paginate";
+import { opensChapter, type LaidPage } from "../book/paginate";
 import { plateShown } from "../state/nav";
 import type { useFolio } from "../state/useFolio";
 import { CURL_MS, CURL_PERSPECTIVE, CURL_REDUCED_MS, EASE_PAPER, curlFrames } from "./curl";
@@ -345,6 +345,7 @@ function BoundPage({
       number={Math.max(1, number)}
       side={side}
       quill={quill}
+      opening={opensChapter(folio.pages.indexOf(page), page.chapterId, folio.chapterStart)}
       covered={Boolean(over)}
       draft={quill ? folio.draft : ""}
       onDraft={folio.setDraft}
@@ -383,6 +384,7 @@ function FaceOnly({ folio, page, side, number }: { folio: Folio; page?: LaidPage
       number={number}
       side={side}
       quill={false}
+      opening={opensChapter(folio.pages.indexOf(page), page.chapterId, folio.chapterStart)}
       draft=""
       onDraft={() => undefined}
       onSubmit={() => undefined}

@@ -7,7 +7,7 @@ import { composeNote } from "../book/notes";
 import { revealNextLine, type Measure } from "../book/wrap";
 import type { EngineClient, FormAnswer, ModelRef } from "../engine/client";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
-import { followTail, initialNav, reduceNav, type Nav } from "./nav";
+import { followTail, initialNav, reduceNav, relocate, type Nav } from "./nav";
 import { save as savePlates, withKeptPlates } from "./plateStore";
 import { DEFAULT_SCALE_INDEX, SCALES, footChars, footFont, footReserve, inkFont, layoutScale, proseFont } from "../ui/scales";
 import { useViewport } from "../ui/useViewport";
@@ -176,6 +176,10 @@ export function useFolio() {
       inkMeasure: measures.ink,
       width: scale.width,
       linesPerPage: scale.lines,
+      quillLines: scale.quillLines,
+      pageRoom: scale.pageRoom,
+      inkWeight: scale.inkWeight,
+      gapWeight: scale.gapWeight,
       dropLines: scale.dropLines,
       dropWidth: scale.dropWidth,
       footLines,
@@ -196,18 +200,34 @@ export function useFolio() {
     });
   }, [layout.chapterStart, fontsReady, jumpTo]);
 
-  const prevPages = useRef<string[]>([]);
+  // The last layout, and what it was laid with: a change of type or window lays every page again.
+  const prevLayout = useRef<{ pages: LaidPage[]; measures: typeof measures; scale: typeof scale; footLines: typeof footLines } | null>(null);
   useEffect(() => {
-    const before = prevPages.current;
-    const after = layout.pages.map((page) => page.chapterId);
-    prevPages.current = after;
-    if (!book || before.length === 0) return;
+    const before = prevLayout.current;
+    prevLayout.current = { pages: layout.pages, measures, scale, footLines };
+    if (!book || !before || before.pages.length === 0) return;
+    const relaid = before.measures !== measures || before.scale !== scale || before.footLines !== footLines;
+    const filled = (pages: LaidPage[]) => pages.map((page) => page.lines.length > 0 || page.footnotes.length > 0);
+    const ids = (pages: LaidPage[]) => pages.map((page) => page.chapterId);
+    const last = Math.max(0, Math.ceil(layout.pages.length / 2) - 1);
     setNav((current) => {
-      if (current.curl || current.view !== "reading") return current;
-      const to = followTail(before, after, current.spread);
+      if (relaid) {
+        // Keep the reader on the line they were reading, not on a spread number the new layout gave other lines.
+        if (current.curl) {
+          // A turn under way lands where its own spread's lines went.
+          const to = relocate(before.pages, layout.pages, current.curl.to);
+          return to === current.curl.to ? current : { ...current, curl: { ...current.curl, to } };
+        }
+        const to = relocate(before.pages, layout.pages, current.spread);
+        return to === current.spread ? current : { ...current, spread: to };
+      }
+      if (current.curl) return current;
+      if (current.spread > last) return { ...current, spread: last };
+      if (current.view !== "reading") return current;
+      const to = followTail(ids(before.pages), ids(layout.pages), current.spread, filled(before.pages), filled(layout.pages));
       return to == null ? current : { ...current, curl: { to, forward: true } };
     });
-  }, [layout.pages, book]);
+  }, [layout.pages, book, measures, scale, footLines]);
 
   useEffect(() => {
     const client = clientRef.current;

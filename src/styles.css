@@ -35,6 +35,7 @@
   --pop-menu: rgba(78, 78, 81, 0.97);
   --fs: 19px;
   --lh: 29px;
+  --ink-fs: 28px;
   --drop-w: 40px;
   --margin-x: 48px;
   /* Motion. Fast for what the reader caused directly, slow only for the physical turn. */
@@ -186,7 +187,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 
 .book {
   width: min(1080px, calc(100vw - 48px));
-  height: min(700px, calc(100vh - 110px));
+  /* The window's height, but a sheet (half the width) no taller than 1.55 times its width.
+     Mirrored by bookHeight() in src/ui/scales.ts, which counts the page's lines from it. */
+  height: min(calc(100vh - 110px), calc(min(1080px, 100vw - 48px) / 2 * 1.55));
   display: grid;
   grid-template-columns: 1fr 1fr;
   position: relative;
@@ -236,6 +239,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   color: var(--faint);
   margin: 0 0 22px;
   position: relative;
+  /* One line, always: the page's line count assumes it (scales.ts RUNNING_LINE). */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .prose { flex: 1; min-height: 0; overflow: hidden; }
 .prose:empty { flex: 0 0 28px; }
@@ -261,7 +266,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   color: var(--quill);
   font-weight: 500;
 }
-.line.ink { font-size: 26px; height: auto; line-height: 1.25; white-space: normal; }
+.line.ink { font-size: var(--ink-fs); height: auto; line-height: 1.25; white-space: normal; }
 .line.with-drop { display: flex; align-items: flex-start; gap: 8px; height: var(--lh); }
 .drop {
   flex: none;
@@ -301,6 +306,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   font-size: 15px; color: var(--soft); text-align: center;
 }
 /* The question may take most of the page while it waits, never all of it. */
+/* Asks and questions come and go, so the page does not count them (that would move lines already
+   laid): on the desk the foot is laid over the bottom of the prose like a slip of paper, above the
+   folio (bottom: sheet padding 22 + folio 8 + 19). Stacked sheets grow, so there it stays in flow. */
+@media (min-width: 901px) {
+  .foot:has(.ask, .ask-form) {
+    position: absolute; left: var(--margin-x); right: var(--margin-x); bottom: 49px; z-index: 1;
+    background: var(--page); padding-top: 6px;
+    box-shadow: 0 -14px 12px -2px var(--page);
+  }
+}
 .foot:has(.ask-form) { max-height: 62%; overflow: auto; }
 .form-field { border: 0; margin: 0 0 6px; padding: 0; min-width: 0; }
 .form-field legend {
@@ -343,7 +358,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   width: 100%; border: 0; resize: none; background: transparent;
   font-size: 28px; line-height: 1.2; min-height: 72px; outline: none;
 }
-.hint { margin: 4px 0 0; color: var(--hint); font-style: italic; font-size: 14px; white-space: pre-wrap; }
+/* One line, always (scales.ts QUILL_HEIGHT counts one): the words give way to an ellipsis, never the
+   stop link; `pre` keeps the double spaces around the dots. */
+.hint { margin: 4px 0 0; color: var(--hint); font-style: italic; font-size: 14px; display: flex; justify-content: center; }
+.hint-text { min-width: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.hint-button { flex: none; }
 /* The hint's words fade in when they change; the stop link fades in each time it is shown. */
 .hint-text, .hint-button { animation: fade-in var(--dur) var(--ease-out) both; }
 .hint-text:empty { display: none; }

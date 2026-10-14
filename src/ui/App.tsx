@@ -12,6 +12,7 @@ export function App() {
   const style = {
     ["--fs" as string]: `${folio.scale.fontSize}px`,
     ["--lh" as string]: `${folio.scale.lineHeight}px`,
+    ["--ink-fs" as string]: `${folio.scale.inkSize}px`,
     ["--drop-w" as string]: `${folio.scale.dropWidth}px`,
     ["--margin-x" as string]: `${folio.scale.marginX}px`,
   };
