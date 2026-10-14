@@ -640,11 +640,20 @@ export function useFolio() {
     if (failed.length) setNotice("The press did not take the new rule for every chapter; those chapters keep their old one.");
   }
 
+  /** The press's client, or a notice saying it is not attached (the question stays where it is). */
+  function attached(): EngineClient | null {
+    const client = clientRef.current;
+    if (!client) setNotice("The press is not attached.");
+    return client;
+  }
+
   /** "Allow once", or "No" with a message so the turn goes on without the change. */
   async function answerAsk(chapterId: string, id: string, decision: "once" | "reject") {
     if (book && !book.sample) {
+      const client = attached();
+      if (!client) return;
       try {
-        await clientRef.current?.permissionReply(chapterId, id, decision, decision === "reject" ? DECLINE_MESSAGE : undefined);
+        await client.permissionReply(chapterId, id, decision, decision === "reject" ? DECLINE_MESSAGE : undefined);
       } catch (error) {
         setNotice(messageOf(error, "The question was not answered."));
         return;
@@ -655,8 +664,10 @@ export function useFolio() {
 
   async function answerForm(chapterId: string, formId: string, answer: FormAnswer) {
     if (book && !book.sample) {
+      const client = attached();
+      if (!client) return;
       try {
-        await clientRef.current?.formReply(chapterId, formId, answer);
+        await client.formReply(chapterId, formId, answer);
       } catch (error) {
         setNotice(messageOf(error, "The answer was not sent."));
         return;
@@ -667,8 +678,10 @@ export function useFolio() {
 
   async function dismissForm(chapterId: string, formId: string) {
     if (book && !book.sample) {
+      const client = attached();
+      if (!client) return;
       try {
-        await clientRef.current?.formCancel(chapterId, formId, "The reader skipped this question.");
+        await client.formCancel(chapterId, formId, "The reader skipped this question.");
       } catch (error) {
         setNotice(messageOf(error, "The question was not set aside."));
         return;
