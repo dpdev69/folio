@@ -9,6 +9,9 @@
 # or APPLE_API_ISSUER, APPLE_API_KEY and APPLE_API_KEY_PATH.
 #
 # FOLIO_TARGET overrides the target triple (default aarch64-apple-darwin).
+# FOLIO_DMG_PLAIN=1 skips the Finder styling of the dmg window (icon positions).
+# Use it on a headless machine or when Finder automation is not allowed: the
+# dmg then times out with "AppleEvent timed out (-1712)" without it.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,6 +23,11 @@ case "$target" in
   x86_64-apple-darwin) arch="x64" ;;
   *) echo "Unsupported FOLIO_TARGET: $target" >&2; exit 1 ;;
 esac
+
+if [ "${FOLIO_DMG_PLAIN:-}" = 1 ]; then
+  # Tauri's dmg bundler skips the Finder AppleScript step when CI is set.
+  export CI=true
+fi
 
 if [ ! -d node_modules ]; then
   npm ci

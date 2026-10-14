@@ -94,6 +94,8 @@ It runs `npm ci` if `node_modules` is missing, fetches the bundled press, then r
 - `macos/Folio.app`
 - `dmg/Folio_<version>_aarch64.dmg` (`_x64` for Intel)
 
+Set `FOLIO_DMG_PLAIN=1` to skip the Finder styling of the dmg window (the app and Applications icon positions). The styling drives Finder with AppleScript, so on a headless machine, or one where Finder automation is not allowed, the dmg step stops with `AppleEvent timed out (-1712)`. The plain dmg still holds `Folio.app` and the Applications link.
+
 At the end the script prints those paths and says whether the build was signed. When it was not, it prints the `codesign` and `xcrun notarytool` commands a release engineer would run.
 
 ### Signed-ready
