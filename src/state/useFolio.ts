@@ -75,6 +75,8 @@ export function useFolio() {
   // before the jump is asked for (its session.created frame can beat the create call's reply).
   const [jumpTo, setJumpTo] = useState<string | null>(null);
   const diffTimers = useRef(new Map<string, number>());
+  // A chapter being opened; a second turn past the last spread meanwhile must not open another.
+  const creatingRef = useRef(false);
   const providersRef = useRef<ProviderInfo[]>([]);
   const bookRef = useRef<Book | null>(null);
   bookRef.current = book;
@@ -545,7 +547,16 @@ export function useFolio() {
   }
 
   async function createChapter() {
-    if (!book) return;
+    if (!book || creatingRef.current) return;
+    creatingRef.current = true;
+    try {
+      await openNewChapter(book);
+    } finally {
+      creatingRef.current = false;
+    }
+  }
+
+  async function openNewChapter(book: Book) {
     if (book.sample) {
       const id = `local-${book.chapters.length + 1}`;
       const chapter: Chapter = {
@@ -560,7 +571,10 @@ export function useFolio() {
         forms: [],
         busy: false,
       };
-      setBook({ ...book, chapters: [...book.chapters, chapter] });
+      // A second quick turn sees the book this one already grew, and adds nothing.
+      setBook((current) =>
+        current && current.chapters.length === book.chapters.length ? { ...current, chapters: [...current.chapters, chapter] } : current,
+      );
       setJumpTo(id);
       return;
     }
