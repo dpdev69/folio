@@ -379,6 +379,19 @@ describe("events", () => {
     expect(next.chapters.map((c) => c.id)).toEqual(["ses_3"]);
   });
 
+  it("never opens a chapter for a subagent's session", () => {
+    const start = book();
+    const child: Frame = {
+      type: "session.created",
+      location: { directory: "/repos/api-server" },
+      data: { sessionID: "ses_child", parentID: "ses_1", location: { directory: "/repos/api-server" }, title: "A subagent" },
+    };
+    expect(applyEvent(start, child)).toBe(start);
+    // Its prose never reaches the book either, having no chapter to go to.
+    const text = applyEvent(start, ev("session.text.delta", { sessionID: "ses_child", assistantMessageID: "m", ordinal: 0, delta: "x" }));
+    expect(text).toBe(start);
+  });
+
   it("returns the same book for frames it does not set in type", () => {
     const start = book();
     expect(applyEvent(start, ev("session.usage.updated", { cost: 0 }))).toBe(start);

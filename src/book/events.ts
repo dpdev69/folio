@@ -132,7 +132,8 @@ export function errorSentence(raw: unknown): string {
 
 function addChapterShell(book: Book, data: Data, location: Data | undefined): Book {
   const id = stringOf(data.sessionID) ?? stringOf(data.id);
-  if (!id) return book;
+  // A subagent's session is part of its parent's turn, not a chapter of its own.
+  if (!id || stringOf(data.parentID)) return book;
   const directory = stringOf(recordOf(data.location)?.directory) ?? stringOf(location?.directory);
   if (directory && book.directory && directory !== book.directory) return book;
   const title = stringOf(data.title);
