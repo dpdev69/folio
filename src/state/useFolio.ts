@@ -10,6 +10,7 @@ import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, initialNav, reduceNav, type Nav } from "./nav";
 import { save as savePlates, withKeptPlates } from "./plateStore";
 import { DEFAULT_SCALE_INDEX, SCALES, footChars, footFont, footReserve, inkFont, layoutScale, proseFont } from "../ui/scales";
+import { useViewport } from "../ui/useViewport";
 import { useSettings } from "./useSettings";
 import {
   applyAskRules,
@@ -84,9 +85,10 @@ export function useFolio() {
   const editBook = stream.editBook;
   const { settings, dispatch: setSettings, theme, appearance } = useSettings();
   const { scaleIndex, lineSpacing, margins } = settings;
+  const viewport = useViewport();
   const scale = useMemo(
-    () => layoutScale(SCALES[scaleIndex] ?? SCALES[DEFAULT_SCALE_INDEX], { lineSpacing, margins }, theme),
-    [scaleIndex, lineSpacing, margins, theme],
+    () => layoutScale(SCALES[scaleIndex] ?? SCALES[DEFAULT_SCALE_INDEX], { lineSpacing, margins, viewport }, theme),
+    [scaleIndex, lineSpacing, margins, theme, viewport],
   );
   const [faceEpoch, setFaceEpoch] = useState(0);
 
@@ -162,7 +164,7 @@ export function useFolio() {
       ctx.font = footFont(theme);
       average = ctx.measureText(sample).width / sample.length;
     }
-    return footReserve(footChars(scale, average));
+    return footReserve(footChars(scale, average), scale.lineHeight);
     // faceEpoch measures again once a newly chosen face has loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontsReady, scale, theme, faceEpoch]);
@@ -813,7 +815,7 @@ export function useFolio() {
     },
     closeColophon: () => setNav(reduceNav(nav, { type: "close-colophon", hadBook: Boolean(book) }).nav),
     searchHits,
-    curlDone: () => setNav(reduceNav(nav, { type: "curl-done" }).nav),
+    curlDone: () => setNav((current) => reduceNav(current, { type: "curl-done" }).nav),
     closeMargin: () => setNav(reduceNav(nav, { type: "margin", open: false }).nav),
     openPlate: (id: string) => setNav(reduceNav(nav, { type: "open-plate", id }).nav),
     foldOpenPlate: () => setNav(reduceNav(nav, { type: "fold-plate" }).nav),

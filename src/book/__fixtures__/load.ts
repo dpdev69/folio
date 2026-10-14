@@ -18,7 +18,7 @@ export const captures = {
 
 /** The directory every capture's session was bound to. */
 export const FIXTURE_DIRECTORY =
-  "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
+  "/tmp/folio-replay/repo";
 
 /** `GET /api/session/{id}/message`, as recorded (newest first). */
 export const editMessages = (JSON.parse(editMessagesJson) as { data: unknown[] }).data;

@@ -2,6 +2,7 @@
 import { plateLines } from "./diff";
 import { toRoman } from "./model";
 import { firstString } from "./values";
+import { insideRoot, pathKey } from "./paths";
 
 export type ToolLike = {
   tool: string;
@@ -169,11 +170,10 @@ export function isEdit(name: string): boolean {
  */
 export function bookPath(file: string | undefined, directory: string | undefined): string | undefined {
   if (!file || !directory || !file.startsWith("/")) return file;
-  const root = directory.replace(/\/+$/, "");
-  const path = file.replace(/\/+$/, "");
-  if (path === root) return undefined;
-  if (path.startsWith(`${root}/`)) return path.slice(root.length + 1);
-  return path.split("/").pop() || file;
+  if (pathKey(file) === pathKey(directory)) return undefined;
+  const inside = insideRoot(file, directory);
+  if (inside !== undefined) return inside;
+  return file.split("/").filter(Boolean).pop() || file;
 }
 
 function lineSpan(input: Record<string, unknown> | undefined): string {

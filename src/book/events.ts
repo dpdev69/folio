@@ -14,6 +14,7 @@ import { NOTE_PREFIX, parseNote } from "./notes";
 import { footnoteSentence, isEdit, type ToolLike } from "./tools";
 import { numberOf, recordOf, stringOf, type Data } from "./values";
 import { stripThink } from "./think";
+import { samePath } from "./paths";
 
 /**
  * One event frame from opencode 2.0, `{id, type, data, location?}`, as it
@@ -140,7 +141,7 @@ function addChapterShell(book: Book, data: Data, location: Data | undefined): Bo
   // A subagent's session is part of its parent's turn, not a chapter of its own.
   if (!id || stringOf(data.parentID)) return book;
   const directory = stringOf(recordOf(data.location)?.directory) ?? stringOf(location?.directory);
-  if (directory && book.directory && directory !== book.directory) return book;
+  if (directory && book.directory && !samePath(directory, book.directory)) return book;
   const title = stringOf(data.title);
   const existing = book.chapters.findIndex((c) => c.id === id);
   if (existing >= 0) {

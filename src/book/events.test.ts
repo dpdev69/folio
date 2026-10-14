@@ -400,6 +400,17 @@ describe("events", () => {
     expect(next.chapters[0]).toMatchObject({ title: "The flaky login test", untitled: false });
   });
 
+  it("treats a directory written another way as the book's own", () => {
+    const created = (directory: string, sessionID: string): Frame => ({
+      type: "session.created",
+      location: { directory },
+      data: { sessionID, location: { directory }, title: "Same place" },
+    });
+    expect(applyEvent(book(), created("/repos/api-server/", "ses_5")).chapters.map((c) => c.id)).toEqual(["ses_1", "ses_5"]);
+    const tmp = { ...book(), directory: "/tmp/folio/repo" };
+    expect(applyEvent(tmp, created("/private/tmp/folio/repo", "ses_6")).chapters.map((c) => c.id)).toContain("ses_6");
+  });
+
   it("opens chapters only for this book's directory, and closes them on delete", () => {
     const created = (directory: string, sessionID: string): Frame => ({
       type: "session.created",
