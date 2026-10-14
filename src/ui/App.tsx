@@ -34,7 +34,10 @@ export function App() {
       ) : null}
       <main className="stage">
         {folio.nav.view === "colophon" ? (
-          <Colophon onClose={() => folio.closeColophon()} />
+          <Colophon
+            onClose={() => folio.closeColophon()}
+            press={folio.press.phase === "ready" ? folio.press.summary : undefined}
+          />
         ) : folio.nav.view === "contents" && folio.book ? (
           <Contents
             book={folio.book}
