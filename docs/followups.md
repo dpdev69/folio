@@ -6,24 +6,20 @@ Collected from the per-task and final reviews. None blocks a session; each is a 
 
 Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the README "Bundled press" section says so), and the CSP was confirmed in the packaged app (`docs/e2e.md` row 20). A new opencode version still needs its pins.
 
-- The on-demand Intel job in `build.yml` (`workflow_dispatch`, `intel`) has not been run.
-- The PowerShell unzip quoting is covered by unit tests only; run `npm run fetch-press` once on Windows.
+- The first CI runs on the private remote (2026-10-14) found and fixed two Windows faults in `fetch-opencode.mjs` (`70f0878`, `b2caae1`: the staged binary had no `.exe`); all three desktop bundles now build. The on-demand Intel job was run the same day; see its run for the result.
 
 ## Book
 
-- Multi-edit turns: when a turn has two plates for one file and a plate holds no patch of its own, it still shows the combined turn lines (Reject already refuses it). A `diff-<file>` plate's patch is frozen at the first scoped diff.
 - A delta missed during a stream reconnect leaves a hole until `session.text.ended` heals it (the reducer now sets early parts in order; the gap is the stream's).
 - `shownProse` hides a streaming part only while it is inside an unclosed `<think>`; a reply that begins with another tag is shown as sent.
 
 ## State and engine
 
 - A Reject in flight can stick: if the prompt reply renames `diff-<file>@local-…` while that Reject is running, the status write misses and the plate reads "Restoring the file…" until a reload. The window is a few hundred milliseconds.
-- If `restartPress` is in flight while `preparePress` switches presses, the old restart's client can still be adopted.
-- A press whose stream holds longer than 2 s and then drops resets the backoff every cycle and is restarted each time; the rule that a held stream opens the gate is kept on purpose.
+- A held stream opens the restart gate, except after more than five restarts in two minutes, when restarts stay at least ten seconds apart.
 - Plate store: the old `@local-…` key of a renamed plate stays in storage until the cap clears it.
-- Two paragraphs with the same text but different marks evict each other in the wrap cache (time only, not correctness).
 - `calls` and `turns` on a chapter grow without bound; the transitional `Frame` index signature and `EventFrame.properties` remain.
-- The restart backoff (3 s doubling to 60 s) resets on a steady stream; a press that answers `/api/info` but never holds a stream is retried at the cap forever, by design.
+- A press that answers `/api/info` but never holds a stream is retried at the 60 s cap forever, by design.
 
 ## Press host
 
@@ -33,8 +29,9 @@ Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the RE
 
 ## Interface
 
-- The ask toggle's "the press will ask before it writes" hint reads the chapter's own rules; ask titles keep raw paths; forms are not counted in the page foot (the foot scrolls instead).
+- The ask toggle's "the press will ask before it writes" hint reads the chapter's own rules; forms are not counted in the page foot (the foot scrolls instead).
 - `platesOnSpread` uses only the left page's chapter; option descriptions in forms appear only in the title attribute.
+- A plate whose change is only part of a larger edit has no lines, so `PlatePage` still shows "The plate is still being set." above its caption; show the caption alone there.
 - The search card stays open after a jump to a hit; the appearance menu covers the Quiet and Paper swatches while it is open.
 - Reduced motion was checked by reading the CSS, not in a browser (the tools cannot emulate it).
 
