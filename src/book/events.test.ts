@@ -415,6 +415,16 @@ describe("events", () => {
     expect(created.chapters[1].askRules).toBe(true);
   });
 
+  it("clears a retry or interruption notice when a run starts, succeeds or fails", () => {
+    const retrying = applyEvent(book(), ev("session.retry.scheduled", { attempt: 2 }));
+    expect(retrying.chapters[0].notice).toBe("Trying again (attempt 2)…");
+    expect(applyEvent(retrying, ev("session.execution.succeeded")).chapters[0].notice).toBeUndefined();
+    expect(applyEvent(retrying, ev("session.execution.failed", { error: { message: "No." } })).chapters[0].notice).toBeUndefined();
+    const interrupted = applyEvent(book(), ev("session.execution.interrupted", { reason: "shutdown" }));
+    expect(interrupted.chapters[0].notice).toBe("The press was interrupted.");
+    expect(applyEvent(interrupted, ev("session.execution.started")).chapters[0].notice).toBeUndefined();
+  });
+
   it("never opens a chapter for a subagent's session", () => {
     const start = book();
     const child: Frame = {

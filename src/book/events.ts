@@ -53,7 +53,7 @@ function reduceChapter(chapter: Chapter, type: string, data: Data, directory?: s
       return Boolean(chapter.askRules) === askRules ? chapter : { ...chapter, askRules };
     }
     case "session.execution.started":
-      return { ...chapter, busy: true, error: undefined };
+      return { ...chapter, busy: true, error: undefined, notice: undefined };
     case "session.execution.succeeded":
       return settle(chapter);
     case "session.execution.failed":
@@ -173,11 +173,15 @@ function retitle(chapter: Chapter, title: string | undefined): Chapter {
   return { ...chapter, title: title!, untitled: false };
 }
 
-/** The run is over: idle, nothing left to answer, and a margin note still waiting will not get its reply. */
+/**
+ * The run is over: idle, nothing left to answer, a margin note still waiting
+ * will not get its reply, and a retry notice no longer applies.
+ */
 function settle(chapter: Chapter): Chapter {
   return {
     ...chapter,
     busy: false,
+    notice: undefined,
     // The press asks only while it runs; an ask left over from a stopped run cannot be answered.
     asks: chapter.asks.length ? [] : chapter.asks,
     forms: chapter.forms.length ? [] : chapter.forms,
