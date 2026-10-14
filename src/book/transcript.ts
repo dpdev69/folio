@@ -11,7 +11,7 @@ type Data = Record<string, unknown>;
  * Notes, asks and forms are kept (a margin question in history brings its note
  * back); blocks, footnotes and plates are rebuilt.
  */
-export function chapterFromMessages(chapter: Chapter, messages: unknown[]): Chapter {
+export function chapterFromMessages(chapter: Chapter, messages: unknown[], directory?: string): Chapter {
   let next: Chapter = { ...chapter, blocks: [], footnotes: [], plates: [], turns: undefined, calls: undefined };
   let lastError: unknown;
   // The note a margin question from history opened, until its reply closes it.
@@ -30,7 +30,7 @@ export function chapterFromMessages(chapter: Chapter, messages: unknown[]): Chap
       }
       next = addInk(next, id, text, Boolean(asked));
     } else if (message.type === "assistant") {
-      next = assistant(stepStarted(next, id), id, message.content);
+      next = assistant(stepStarted(next, id), id, message.content, directory);
       lastError = message.error;
     }
     // idle, synthetic, compaction and the rest are not set in type.
@@ -62,7 +62,7 @@ function letGo(chapter: Chapter, noteId: string | undefined): Chapter {
   return { ...chapter, notes: chapter.notes.map((n) => (n.id === noteId ? { ...n, pending: false } : n)) };
 }
 
-function assistant(chapter: Chapter, messageId: string, content: unknown): Chapter {
+function assistant(chapter: Chapter, messageId: string, content: unknown, directory?: string): Chapter {
   let next = chapter;
   let ordinal = 0;
   for (const raw of Array.isArray(content) ? content : []) {
@@ -71,21 +71,21 @@ function assistant(chapter: Chapter, messageId: string, content: unknown): Chapt
       next = setText(next, textBlockId(messageId, ordinal), stringOf(item.text) ?? "", "end");
       ordinal += 1;
     } else if (item?.type === "tool") {
-      next = tool(next, messageId, item);
+      next = tool(next, messageId, item, directory);
     }
   }
   return next;
 }
 
-function tool(chapter: Chapter, messageId: string, item: Data): Chapter {
+function tool(chapter: Chapter, messageId: string, item: Data, directory?: string): Chapter {
   const id = stringOf(item.id);
   const name = stringOf(item.name);
   const state = recordOf(item.state);
   if (!id || !name || !state) return chapter;
   // A tool still streaming its input holds it as raw, partial JSON.
-  const called = toolCalled(chapter, id, recordOf(state.input) ?? {}, messageId, name);
-  if (state.status === "completed") return toolSucceeded(called, id, state.content, state.metadata);
-  if (state.status === "error") return toolFailed(called, id, state.error);
+  const called = toolCalled(chapter, id, recordOf(state.input) ?? {}, messageId, name, directory);
+  if (state.status === "completed") return toolSucceeded(called, id, state.content, state.metadata, directory);
+  if (state.status === "error") return toolFailed(called, id, state.error, directory);
   return called;
 }
 

@@ -129,3 +129,21 @@ describe("chapterFromMessages", () => {
     ]);
   });
 });
+
+describe("paths in history", () => {
+  it("names files from the book's root when the book directory is given", () => {
+    const read = chapterFromMessages(
+      empty("ses_1"),
+      [
+        { id: "msg_u", type: "user", text: "Go." },
+        {
+          id: "msg_a",
+          type: "assistant",
+          content: [{ type: "tool", id: "c1", name: "read", state: { status: "completed", input: { filePath: "/r/book/src/a.ts" } } }],
+        },
+      ],
+      "/r/book",
+    );
+    expect(read.footnotes.map((f) => f.text)).toEqual(["Read src/a.ts."]);
+  });
+});

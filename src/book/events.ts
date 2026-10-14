@@ -33,14 +33,14 @@ export function applyEvent(book: Book, frame: Frame): Book {
   if (index < 0) return book;
   if (type === "session.deleted") return { ...book, chapters: book.chapters.filter((c) => c.id !== sessionID) };
   const chapter = book.chapters[index];
-  const next = reduceChapter(chapter, type, data);
+  const next = reduceChapter(chapter, type, data, book.directory || undefined);
   if (next === chapter) return book;
   const chapters = book.chapters.slice();
   chapters[index] = next;
   return { ...book, chapters };
 }
 
-function reduceChapter(chapter: Chapter, type: string, data: Data): Chapter {
+function reduceChapter(chapter: Chapter, type: string, data: Data, directory?: string): Chapter {
   const aid = stringOf(data.assistantMessageID);
   const ordinal = numberOf(data.ordinal);
   const id = stringOf(data.id);
@@ -75,13 +75,13 @@ function reduceChapter(chapter: Chapter, type: string, data: Data): Chapter {
       // Only this event names the tool; the rest of the input stream is ignored.
       return id ? nameTool(chapter, id, stringOf(data.name)) : chapter;
     case "session.tool.called":
-      return id ? toolCalled(chapter, id, recordOf(data.input) ?? {}, aid, stringOf(data.name)) : chapter;
+      return id ? toolCalled(chapter, id, recordOf(data.input) ?? {}, aid, stringOf(data.name), directory) : chapter;
     case "session.tool.success":
-      return id ? toolSucceeded(chapter, id, data.content, data.metadata) : chapter;
+      return id ? toolSucceeded(chapter, id, data.content, data.metadata, directory) : chapter;
     case "session.tool.failed":
-      return id ? toolFailed(chapter, id, data.error) : chapter;
+      return id ? toolFailed(chapter, id, data.error, directory) : chapter;
     case "permission.asked":
-      return addAsk(chapter, data);
+      return addAsk(chapter, data, directory);
     case "permission.replied": {
       const requestID = stringOf(data.requestID);
       return chapter.asks.some((a) => a.id === requestID)
@@ -94,7 +94,7 @@ function reduceChapter(chapter: Chapter, type: string, data: Data): Chapter {
     case "form.cancelled":
       return chapter.forms.some((f) => f.id === id) ? { ...chapter, forms: chapter.forms.filter((f) => f.id !== id) } : chapter;
     case "folio.diff":
-      return rewordPlates(applyDiff(chapter, data.diff, stringOf(data.turnMessageId) ?? lastInkId(chapter), data.unscoped === true));
+      return rewordPlates(applyDiff(chapter, data.diff, stringOf(data.turnMessageId) ?? lastInkId(chapter), data.unscoped === true), directory);
     default:
       return chapter;
   }
@@ -267,18 +267,19 @@ export function toolCalled(
   input: Data,
   messageId?: string,
   name?: string,
+  directory?: string,
 ): Chapter {
   const known = chapter.calls?.[id];
   const call = { name: name ?? known?.name ?? "tool", input, messageId: messageId ?? known?.messageId };
-  return placeTool({ ...chapter, calls: { ...chapter.calls, [id]: call } }, id, { status: "running" });
+  return placeTool({ ...chapter, calls: { ...chapter.calls, [id]: call } }, id, { status: "running" }, [], directory);
 }
 
-export function toolSucceeded(chapter: Chapter, id: string, content: unknown, metadata: unknown): Chapter {
+export function toolSucceeded(chapter: Chapter, id: string, content: unknown, metadata: unknown, directory?: string): Chapter {
   if (!chapter.calls?.[id]) return chapter;
-  return placeTool(chapter, id, { status: "completed", output: joinText(content) }, filesOf(metadata));
+  return placeTool(chapter, id, { status: "completed", output: joinText(content) }, filesOf(metadata), directory);
 }
 
-export function toolFailed(chapter: Chapter, id: string, raw: unknown): Chapter {
+export function toolFailed(chapter: Chapter, id: string, raw: unknown, directory?: string): Chapter {
   if (!chapter.calls?.[id]) return chapter;
   const error = recordOf(raw);
   const type = stringOf(error?.type);
@@ -286,7 +287,7 @@ export function toolFailed(chapter: Chapter, id: string, raw: unknown): Chapter 
     status: "error",
     error: stringOf(error?.message),
     declined: type === "aborted" || type === "permission.rejected",
-  });
+  }, [], directory);
 }
 
 /** Word a tool call as a footnote, and set the plate of a file it changed. */
@@ -295,6 +296,7 @@ function placeTool(
   id: string,
   outcome: Pick<ToolLike, "status" | "output" | "error" | "declined">,
   files: ReturnType<typeof filesOf> = [],
+  directory?: string,
 ): Chapter {
   const call = chapter.calls![id];
   const like: ToolLike = { tool: call.name, input: call.input, ...outcome };
@@ -313,7 +315,7 @@ function placeTool(
       }
     }
   }
-  const sentence = footnoteSentence(like, plateId ? plates.find((p) => p.id === plateId)?.n : undefined);
+  const sentence = footnoteSentence(like, plateId ? plates.find((p) => p.id === plateId)?.n : undefined, { directory });
   const footnotes = chapter.footnotes.slice();
   const existing = footnotes.findIndex((f) => f.id === id);
   // Once set, an anchor stays put; only a footnote still waiting for text is placed again.
@@ -334,7 +336,7 @@ function placeTool(
 }
 
 /** A plate the session diff reset keeps a footnote that tells the same counts. */
-function rewordPlates(chapter: Chapter): Chapter {
+function rewordPlates(chapter: Chapter, directory?: string): Chapter {
   let changed = false;
   const footnotes = chapter.footnotes.map((note) => {
     const call = chapter.calls?.[note.id];
@@ -347,7 +349,7 @@ function rewordPlates(chapter: Chapter): Chapter {
       additions: plate.additions,
       deletions: plate.deletions,
     };
-    const text = footnoteSentence(like, plate.n).text;
+    const text = footnoteSentence(like, plate.n, { directory }).text;
     if (text === note.text) return note;
     changed = true;
     return { ...note, text };
@@ -355,7 +357,7 @@ function rewordPlates(chapter: Chapter): Chapter {
   return changed ? { ...chapter, footnotes } : chapter;
 }
 
-function addAsk(chapter: Chapter, data: Data): Chapter {
+function addAsk(chapter: Chapter, data: Data, directory?: string): Chapter {
   const id = stringOf(data.id);
   if (!id) return chapter;
   const permission = stringOf(data.action) ?? "*";
@@ -373,7 +375,7 @@ function addAsk(chapter: Chapter, data: Data): Chapter {
   // The edit waiting on this ask shows the change the press proposes, not its own strings.
   const call = callId ? chapter.calls?.[callId] : undefined;
   if (!callId || !call || !isEdit(call.name) || !files.some((f) => f.patch)) return next;
-  return placeTool(next, callId, { status: "running" }, files);
+  return placeTool(next, callId, { status: "running" }, files, directory);
 }
 
 function verb(action: string): string {

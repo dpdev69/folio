@@ -655,6 +655,30 @@ describe("footnote anchors", () => {
     next = play(next, tool("completed"));
     expect(next.chapters[0].footnotes[0]).toMatchObject({ blockId: "msg_a:t1", offset: 0 });
   });
+
+  it("names an absolute path from the book's root, for an edit and for its ask", () => {
+    const file = "/repos/api-server/src/greet.ts";
+    const patch = "--- a/src/greet.ts\n+++ b/src/greet.ts\n@@ -1,1 +1,2 @@\n a\n+b\n";
+    let next = play(book(), [
+      delta(0, "Done."),
+      ev("session.tool.input.started", { assistantMessageID: AID, id: "call-e", name: "edit" }),
+      ev("session.tool.called", { assistantMessageID: AID, id: "call-e", input: { filePath: file, oldString: "a", newString: "a\nb" } }),
+    ]);
+    expect(next.chapters[0].footnotes[0].text).toBe("Editing src/greet.ts…");
+    next = applyEvent(
+      next,
+      ev("permission.asked", {
+        id: "per_1",
+        action: "edit",
+        resources: [file],
+        source: { type: "tool", id: "call-e" },
+        metadata: { files: [{ file, patch }] },
+      }),
+    );
+    expect(next.chapters[0].footnotes[0].text).toBe("Editing src/greet.ts…");
+    next = applyEvent(next, ev("session.tool.success", { assistantMessageID: AID, id: "call-e", content: [], metadata: { files: [{ file, patch }] } }));
+    expect(next.chapters[0].footnotes[0].text).toBe("Edited src/greet.ts, 1 line added. See Plate I →");
+  });
 });
 
 describe("plates keep their patch", () => {

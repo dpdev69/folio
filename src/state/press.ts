@@ -230,7 +230,7 @@ export async function refreshBook(client: EngineClient, book: Book): Promise<Boo
   const running = new Set(await client.activeSessions().catch(() => []));
   const chapters: Chapter[] = [];
   for (const chapter of book.chapters) {
-    let next = chapterFromMessages(chapter, await client.messages(chapter.id));
+    let next = chapterFromMessages(chapter, await client.messages(chapter.id), book.directory);
     const frame = await turnDiff(client, next).catch(() => null);
     if (frame) next = applyEvent({ ...book, chapters: [next] }, frame).chapters[0];
     // The press's list of waiting asks and forms is the truth; if it cannot be read, keep what is held.

@@ -19,9 +19,18 @@ export type ToolLike = {
   endedAt?: number;
 };
 
-export function footnoteSentence(tool: ToolLike, plateNumber?: number): { text: string; opensPlate: boolean } {
+export type FootnoteOptions = {
+  /** The book's folder: a path inside it is named from its root, one outside it by its basename. */
+  directory?: string;
+};
+
+export function footnoteSentence(
+  tool: ToolLike,
+  plateNumber?: number,
+  options: FootnoteOptions = {},
+): { text: string; opensPlate: boolean } {
   const name = tool.tool.toLowerCase();
-  const file = firstString(tool.input, ["filePath", "file", "path", "file_path"]);
+  const file = bookPath(firstString(tool.input, ["filePath", "file", "path", "file_path"]), options.directory);
   const command = firstString(tool.input, ["command", "cmd"]);
   const title = tool.title?.trim();
   const time = duration(tool);
@@ -135,6 +144,20 @@ function sentence(text: string): string {
 /** Tools that change a file, and so open a plate. */
 export function isEdit(name: string): boolean {
   return ["edit", "write", "apply_patch", "multiedit", "patch"].includes(name.toLowerCase());
+}
+
+/**
+ * A path as the reader knows it: from the book's root when it lies inside the
+ * book, by its basename when it lies outside, and as given when it is already
+ * relative or no book is known. The root itself is no path at all.
+ */
+export function bookPath(file: string | undefined, directory: string | undefined): string | undefined {
+  if (!file || !directory || !file.startsWith("/")) return file;
+  const root = directory.replace(/\/+$/, "");
+  const path = file.replace(/\/+$/, "");
+  if (path === root) return undefined;
+  if (path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+  return path.split("/").pop() || file;
 }
 
 function firstString(input: Record<string, unknown> | undefined, keys: string[]): string | undefined {

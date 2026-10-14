@@ -116,3 +116,44 @@ describe("plates", () => {
     expect(lines.find((line) => line.text.includes("beforeEach"))?.oldNo).toBe(12);
   });
 });
+
+describe("footnote paths", () => {
+  const options = { directory: "/Users/me/repos/greeter" };
+  const read = (filePath: string) => ({ tool: "read", input: { filePath }, status: "completed" as const });
+
+  it("names a file inside the book by its path from the book's root", () => {
+    const edit = {
+      tool: "edit",
+      input: { filePath: "/Users/me/repos/greeter/src/greet.ts", oldString: "a", newString: "a\nb" },
+      status: "completed" as const,
+      additions: 4,
+      deletions: 0,
+    };
+    expect(footnoteSentence(edit, 1, options).text).toBe("Edited src/greet.ts, 4 lines added. See Plate I →");
+    expect(footnoteSentence(read("/Users/me/repos/greeter/README.md"), undefined, { directory: "/Users/me/repos/greeter/" }).text).toBe(
+      "Read README.md.",
+    );
+  });
+
+  it("names a file outside the book by its basename, and leaves relative paths alone", () => {
+    expect(footnoteSentence(read("/etc/hosts"), undefined, options).text).toBe("Read hosts.");
+    expect(footnoteSentence(read("/Users/me/repos/greeter-old/a.ts"), undefined, options).text).toBe("Read a.ts.");
+    expect(footnoteSentence(read("src/greet.ts"), undefined, options).text).toBe("Read src/greet.ts.");
+  });
+
+  it("calls the book's own root the tree, and words a declined edit the same way", () => {
+    const list = { tool: "list", input: { path: "/Users/me/repos/greeter" }, status: "completed" as const };
+    expect(footnoteSentence(list, undefined, options).text).toBe("Looked through the tree.");
+    const declined = {
+      tool: "edit",
+      input: { filePath: "/Users/me/repos/greeter/src/greet.ts" },
+      status: "error" as const,
+      declined: true,
+    };
+    expect(footnoteSentence(declined, undefined, options).text).toBe("The edit to src/greet.ts was declined.");
+  });
+
+  it("keeps an absolute path when no book directory is known", () => {
+    expect(footnoteSentence(read("/etc/hosts")).text).toBe("Read /etc/hosts.");
+  });
+});
