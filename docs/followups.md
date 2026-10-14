@@ -4,9 +4,9 @@ Collected from the per-task and final reviews. None blocks a session; each is a 
 
 ## Before the first signed public release
 
-- SHA-256 pins: only `opencode-darwin-arm64.zip` 2.0.28 is pinned in `scripts/opencode-checksums.json`; an absent pin warns. Pin the other five archives (download each once and record the digest) and every new version.
+Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the README "Bundled press" section says so), and the CSP was confirmed in the packaged app (`docs/e2e.md` row 20). A new opencode version still needs its pins.
+
 - The on-demand Intel job in `build.yml` (`workflow_dispatch`, `intel`) has not been run.
-- The pre-mount script in `index.html` is allowed by a CSP hash (`scripts/csp.test.mjs` keeps them in step); confirm in the packaged app that no CSP violation is logged.
 - The PowerShell unzip quoting is covered by unit tests only; run `npm run fetch-press` once on Windows.
 
 ## Book
@@ -35,7 +35,6 @@ Collected from the per-task and final reviews. None blocks a session; each is a 
 
 - The ask toggle's "the press will ask before it writes" hint reads the chapter's own rules; ask titles keep raw paths; forms are not counted in the page foot (the foot scrolls instead).
 - `platesOnSpread` uses only the left page's chapter; option descriptions in forms appear only in the title attribute.
-- A plate being reverted is shown as "Restoring the file…", also when Reject removes a file the plate created; the state was checked by typecheck and the live audit, not against a real press.
 - The search card stays open after a jump to a hit; the appearance menu covers the Quiet and Paper swatches while it is open.
 - Reduced motion was checked by reading the CSS, not in a browser (the tools cannot emulate it).
 
