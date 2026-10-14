@@ -38,16 +38,15 @@ export function footnoteSentence(
   if (tool.status === "error" && tool.declined) return { text: declinedSentence(name, file, command), opensPlate: false };
 
   if (name === "bash" || name === "shell") {
-    const what = title || command || "a command";
+    // A long command (an inline script) is clipped; the footnote names it, it does not reprint it.
+    const what = title || (command ? clip(command, 64) : "a command");
     if (tool.status === "running" || tool.status === "pending") {
       return { text: `Running ${what}…`, opensPlate: false };
     }
     if (tool.status === "error") return { text: `${what} failed${reason(tool.error)}.`, opensPlate: false };
     const detail = summarizeOutput(tool.output);
-    return {
-      text: `Ran ${what}${detail ? `. ${detail}` : ""}${time}.`,
-      opensPlate: false,
-    };
+    const body = `Ran ${what}${detail ? `. ${detail}` : ""}${time}`;
+    return { text: detail && !time ? sentence(body) : `${body}.`, opensPlate: false };
   }
 
   if (name === "read") {
@@ -198,12 +197,13 @@ function summarizeOutput(output: string | undefined): string {
   const line = output
     .split("\n")
     .map((l) => l.trim())
-    .find((l) => l && !l.startsWith("#"));
+    // A line of only brackets or punctuation ("{") says nothing.
+    .find((l) => l && !l.startsWith("#") && /[\p{L}\p{N}]/u.test(l));
   if (!line) return "";
   return clip(line);
 }
 
-function clip(text: string): string {
+function clip(text: string, max = 140): string {
   const clean = text.replace(/\s+/g, " ").trim();
-  return clean.length > 140 ? `${clean.slice(0, 137)}…` : clean;
+  return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }

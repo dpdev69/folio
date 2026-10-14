@@ -117,6 +117,29 @@ describe("plates", () => {
   });
 });
 
+describe("shell footnotes from a live run", () => {
+  const shell = (command: string, output: string) => ({ tool: "bash", input: { command }, status: "completed" as const, output });
+
+  it("does not double the full stop after output that ends a sentence", () => {
+    expect(footnoteSentence(shell("node -e 'greet()'", "Hello, Ada.\n")).text).toBe("Ran node -e 'greet()'. Hello, Ada.");
+  });
+
+  it("skips output lines that are only punctuation", () => {
+    expect(footnoteSentence(shell("cat package.json", "{\n  \"name\": \"greeter\",\n}")).text).toBe(
+      'Ran cat package.json. "name": "greeter",.',
+    );
+    expect(footnoteSentence(shell("cat empty.json", "{\n}\n")).text).toBe("Ran cat empty.json.");
+  });
+
+  it("clips a long command so the footnote stays a line or two", () => {
+    const command = `node --input-type=module -e '${"const x = 1; ".repeat(20)}'`;
+    const text = footnoteSentence(shell(command, "")).text;
+    expect(text.startsWith("Ran node --input-type=module -e 'const x = 1;")).toBe(true);
+    expect(text.endsWith("….")).toBe(true);
+    expect(text.length).toBeLessThanOrEqual(80);
+  });
+});
+
 describe("footnote paths", () => {
   const options = { directory: "/Users/me/repos/greeter" };
   const read = (filePath: string) => ({ tool: "read", input: { filePath }, status: "completed" as const });
