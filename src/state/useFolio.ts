@@ -10,6 +10,7 @@ import { coalesce } from "../engine/coalesce";
 import type { EventFrame } from "../engine/sse";
 import { licenseBlocks, uncheckedLicense } from "../license/check";
 import { followTail, initialNav, reduceNav, type Nav } from "./nav";
+import { save as savePlates, withKeptPlates } from "./plateStore";
 import { DEFAULT_SCALE_INDEX, SCALES, footChars, footFont, footReserve, inkFont, layoutScale, proseFont } from "../ui/scales";
 import { useSettings } from "./useSettings";
 import { keyProviders, pressSummary, type PressPhase } from "../welcome/copy";
@@ -214,6 +215,19 @@ export function useFolio() {
     }
   }, [book]);
 
+  // Keep what the reader decided about each plate, so a reload finds it as it was left.
+  const savedPlates = useRef(new Map<string, string>());
+  useEffect(() => {
+    if (!book || book.sample) return;
+    for (const chapter of book.chapters) {
+      if (!chapter.plates.length) continue;
+      const signature = chapter.plates.map((plate) => `${plate.id}:${plate.status}:${plate.folded}`).join("|");
+      if (savedPlates.current.get(chapter.id) === signature) continue;
+      savedPlates.current.set(chapter.id, signature);
+      savePlates(chapter.id, chapter.plates);
+    }
+  }, [book]);
+
   // The model list lives in the menu; it closes with it.
   useEffect(() => {
     if (!menuOpen) setModelsOpen(false);
@@ -292,7 +306,7 @@ export function useFolio() {
     abortRef.current?.abort();
     stopStream();
     try {
-      const next = await loadBook(client, folder, { askBeforeWrite, model });
+      const next = withKeptPlates(await loadBook(client, folder, { askBeforeWrite, model }));
       // Errors already in the history are old news.
       seenErrors.current = new Map(next.chapters.flatMap((c) => (c.error ? [[c.id, c.error] as const] : [])));
       listen(client);
@@ -355,7 +369,7 @@ export function useFolio() {
     try {
       const snapshot = bookRef.current;
       if (!snapshot || snapshot.sample) return;
-      const fresh = await refreshBook(client, snapshot);
+      const fresh = withKeptPlates(await refreshBook(client, snapshot));
       if (signal.aborted) return;
       const frames = run.frames.slice();
       setBook((current) => (current && !current.sample && current.id === fresh.id ? mergeResync(current, fresh, frames) : current));
