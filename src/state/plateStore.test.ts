@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Chapter, Plate } from "../book/model";
+import { applyEvent, type Frame } from "../book/events";
+import type { Book, Chapter, Plate } from "../book/model";
+import { chapterFromMessages } from "../book/transcript";
 import { applyPlates, load, mergeState, PLATE_SESSIONS, save, withKeptPlates, type PlateStorage } from "./plateStore";
 
 function memory(): PlateStorage & { data: Map<string, string> } {
@@ -36,16 +38,16 @@ describe("the plate store", () => {
   });
 
   it("sets the kept state on plates with the same id, and leaves the rest as the press sent them", () => {
-    const read = chapter([plate("plate-a"), plate("plate-b"), plate("diff-src/c.ts")]);
+    const read = chapter([plate("plate-a"), plate("plate-b"), plate("diff-src/c.ts@msg_u1")]);
     const set = applyPlates(read, {
       "plate-a": { status: "accepted", folded: false },
-      "diff-src/c.ts": { status: "reverted", folded: true },
+      "diff-src/c.ts@msg_u1": { status: "reverted", folded: true },
       "plate-gone": { status: "accepted", folded: true },
     });
     expect(set.plates.map((p) => [p.id, p.status, p.folded])).toEqual([
       ["plate-a", "accepted", false],
       ["plate-b", "open", false],
-      ["diff-src/c.ts", "reverted", true],
+      ["diff-src/c.ts@msg_u1", "reverted", true],
     ]);
     expect(applyPlates(read, {})).toBe(read);
   });
@@ -106,5 +108,48 @@ describe("the plate store", () => {
     expect(load("ses_2", garbled)).toEqual({ q: { status: "accepted", folded: true } });
     expect(load("ses_1", null)).toEqual({});
     expect(() => save("ses_1", [plate("p")], null)).not.toThrow();
+  });
+
+  it("gives each turn's diff plate of one file its own status across a reload", () => {
+    const storage = memory();
+    const patch = (line: string) => `--- a/src/greet.ts\n+++ b/src/greet.ts\n@@ -1,1 +1,2 @@\n export {};\n+${line}\n`;
+    const diff = (turnMessageId: string, line: string): Frame => ({
+      type: "folio.diff",
+      data: { sessionID: "ses_1", turnMessageId, diff: [{ file: "src/greet.ts", patch: patch(line), status: "modified", additions: 1, deletions: 0 }] },
+    });
+    const prompt = (inboxID: string, text: string): Frame => ({
+      type: "session.inbox.enqueued",
+      data: { sessionID: "ses_1", inboxID, item: { type: "user", payload: { text } } },
+    });
+    // Two turns change src/greet.ts outside an edit tool (a shell call), so only the session diff sets their plates.
+    const shelf: Book = { id: "r", title: "r", directory: "/r", sample: false, chapters: [chapter([])] };
+    const live = [prompt("msg_u1", "Tidy greet."), diff("msg_u1", "tidy"), prompt("msg_u2", "Add a wave."), diff("msg_u2", "wave")]
+      .reduce(applyEvent, shelf).chapters[0];
+    expect(live.plates.map((p) => [p.id, p.n, p.turnMessageId])).toEqual([
+      ["diff-src/greet.ts@msg_u1", 1, "msg_u1"],
+      ["diff-src/greet.ts@msg_u2", 2, "msg_u2"],
+    ]);
+    // The reader rejects the first turn's change and accepts the second's.
+    const [first, second] = live.plates;
+    save("ses_1", [{ ...first, status: "reverted", folded: true }, { ...second, status: "accepted" }], storage);
+
+    // A reload reads the history again and only the latest turn's diff.
+    const history = [
+      { id: "msg_u1", type: "user", text: "Tidy greet." },
+      { id: "msg_a1", type: "assistant", content: [{ type: "text", text: "Tidied." }] },
+      { id: "msg_u2", type: "user", text: "Add a wave." },
+      { id: "msg_a2", type: "assistant", content: [{ type: "text", text: "Waved." }] },
+    ];
+    const read = chapterFromMessages(chapter([]), history, "/r");
+    const rebuilt = applyEvent({ ...shelf, chapters: [read] }, diff("msg_u2", "wave")).chapters[0];
+    const reopened = applyPlates(rebuilt, load("ses_1", storage));
+    expect(reopened.plates).toHaveLength(1);
+    expect(reopened.plates[0]).toMatchObject({ id: "diff-src/greet.ts@msg_u2", turnMessageId: "msg_u2", status: "accepted", folded: false });
+    // The first turn's plate, if a later read sets it again, still finds its own status.
+    const both = applyEvent({ ...shelf, chapters: [reopened] }, diff("msg_u1", "tidy")).chapters[0];
+    expect(applyPlates(both, load("ses_1", storage)).plates.map((p) => [p.id, p.status, p.folded])).toEqual([
+      ["diff-src/greet.ts@msg_u2", "accepted", false],
+      ["diff-src/greet.ts@msg_u1", "reverted", true],
+    ]);
   });
 });

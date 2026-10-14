@@ -75,7 +75,12 @@ export function dropPlate(plates: Plate[], id: string): Plate[] {
  * patch covers that turn only (without `from` the diff is cumulative for the
  * whole session). A patch updates the latest plate for its file in that turn,
  * keeping its number, status and fold; a file with no plate in the turn gets a
- * `diff-<file>` plate of its own. Plates of earlier turns are left alone.
+ * plate of its own. Plates of earlier turns are left alone.
+ *
+ * A diff plate's id names its file and its turn, `diff-<file>@<turnMessageId>`,
+ * so a reload that rebuilds only the latest turn gives that plate the same id
+ * it had before, and the reader's kept Accept or Reject finds it again. Only a
+ * frame with no turn at all (which carries no patch) falls back to `diff-<file>`.
  *
  * The diff sets a plate's lines, never a patch the plate already has: a tool's
  * patch covers that one edit, while the turn's patch covers every edit to the
@@ -91,8 +96,7 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
     const lines = diff.patch ? parsePatch(diff.patch) : [];
     const existing = plates.filter((p) => p.file === diff.file && p.turnMessageId === turnMessageId).pop();
     if (!existing && !lines.length) continue;
-    const free = `diff-${diff.file}`;
-    const id = existing?.id ?? (plates.some((p) => p.id === free) ? `${free}-${turnMessageId}` : free);
+    const id = existing?.id ?? diffPlateId(diff.file, turnMessageId);
     const plate: Plate = {
       id,
       n: existing?.n ?? plates.length + 1,
@@ -111,6 +115,11 @@ export function applyDiff(chapter: Chapter, raw: unknown, turnMessageId: string 
     plates = existing ? plates.map((p) => (p.id === existing.id ? plate : p)) : [...plates, plate];
   }
   return { ...chapter, plates, diffStale: false };
+}
+
+/** The id of a plate set from the session diff: the same for a file's turn on every read. */
+export function diffPlateId(file: string, turnMessageId: string | undefined): string {
+  return turnMessageId ? `diff-${file}@${turnMessageId}` : `diff-${file}`;
 }
 
 function captionFor(status: string | undefined, file: string): string {

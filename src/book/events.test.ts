@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyEvent, appendPrompt, MODEL_GONE, renameBlock, type Frame } from "./events";
 import { parsePatch, reversePatch } from "./diff";
+import { applyDiff } from "./plates";
 import { quillKey } from "./quill";
 import type { Book, Chapter } from "./model";
 import { pushSse, unwrapEvent } from "../engine/sse";
@@ -163,7 +164,7 @@ describe("the edit capture (fixture-edit.sse)", () => {
       }),
     );
     expect(chapter.plates[1]).toMatchObject({
-      id: "diff-src/wave.ts",
+      id: "diff-src/wave.ts@msg_1378318cd0011en9zAGWcvx4bC",
       n: 2,
       file: "src/wave.ts",
       caption: "New file src/wave.ts.",
@@ -240,20 +241,27 @@ describe("the session diff (folio.diff)", () => {
     expect(reversePatch("export {};\nwave2\nwave1\n", second.patch!)).toBe("export {};\nwave1\n");
   });
 
+  it("names a diff plate by its file alone only when no turn is known", () => {
+    const bare = book().chapters[0];
+    const diff = [{ file: "src/greet.ts", patch: patch(["wave"]), status: "modified" }];
+    expect(applyDiff(bare, diff, undefined, true).plates[0]).toMatchObject({ id: "diff-src/greet.ts", patch: undefined });
+    expect(applyDiff(bare, diff, "msg_u1").plates[0].id).toBe("diff-src/greet.ts@msg_u1");
+  });
+
   it("opens a plate of its own when the current turn has none for the file", () => {
     let start = secondTurn(0);
     const chapter = diffed(start, ["wave"]);
     expect(chapter.plates[0]).toEqual(start.chapters[0].plates[0]);
-    expect(chapter.plates[1]).toMatchObject({ id: "diff-src/greet.ts", n: 2, turnMessageId: "msg_u2", additions: 1 });
-    // A later turn's plate for the same file gets an id of its own.
+    expect(chapter.plates[1]).toMatchObject({ id: "diff-src/greet.ts@msg_u2", n: 2, turnMessageId: "msg_u2", additions: 1 });
+    // A later turn's plate for the same file gets an id of its own, named by its turn.
     start = play({ ...start, chapters: [chapter] }, [
       { type: "session.inbox.enqueued", data: { sessionID: chapter.id, inboxID: "msg_u3", item: { type: "user", payload: { text: "More." } } } },
     ]);
     const third = diffed(start, ["more"]);
     expect(third.plates.map((p) => [p.id, p.turnMessageId])).toEqual([
       ["plate-call-816f41ab-c832-4c99-90c1-7a0d47056457", "msg_1378318cd0011en9zAGWcvx4bC"],
-      ["diff-src/greet.ts", "msg_u2"],
-      ["diff-src/greet.ts-msg_u3", "msg_u3"],
+      ["diff-src/greet.ts@msg_u2", "msg_u2"],
+      ["diff-src/greet.ts@msg_u3", "msg_u3"],
     ]);
   });
 });
@@ -709,7 +717,8 @@ describe("plates keep their patch", () => {
     // A file the turn has no plate for gets a diff plate, still without a patch.
     const other = [{ ...editDiff[0], file: "README.md", patch: editDiff[0].patch.replaceAll("src/greet.ts", "README.md") }];
     const opened = only(applyEvent(bare, { type: "folio.diff", data: { sessionID, diff: other, unscoped: true } }));
-    const plate = opened.plates.find((p) => p.id === "diff-README.md")!;
+    const plate = opened.plates.find((p) => p.file === "README.md")!;
+    expect(plate.id).toBe(`diff-README.md@${opened.plates[0].turnMessageId}`);
     expect(plate.lines.length).toBeGreaterThan(0);
     expect(plate.patch).toBeUndefined();
   });
