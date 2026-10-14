@@ -30,10 +30,8 @@ Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the RE
 ## Interface
 
 - The ask toggle's "the press will ask before it writes" hint reads the chapter's own rules; forms are not counted in the page foot (the foot scrolls instead).
-- `platesOnSpread` uses only the left page's chapter; option descriptions in forms appear only in the title attribute.
-- A plate whose change is only part of a larger edit has no lines, so `PlatePage` still shows "The plate is still being set." above its caption; show the caption alone there.
-- The search card stays open after a jump to a hit; the appearance menu covers the Quiet and Paper swatches while it is open.
-- Reduced motion was checked by reading the CSS, not in a browser (the tools cannot emulate it).
+- Reduced motion was verified in the browser on 2026-10-15 with Playwright emulation: turns fade without a curl, plates lay and fold without travel, the menu pops at once, and the curl is unchanged without it.
+- The appearance menu now opens in the pane above the themes and lengthens the card while open; a lighter way to keep every swatch in sight may be wanted.
 
 ## Docs
 
