@@ -2,6 +2,19 @@ import { shownLineNumber } from "../book/diff";
 import type { PermissionAsk, Plate } from "../book/model";
 import { plateRoman } from "./Page";
 
+/** The caption `partOfLarger` gives a plate whose change is shown on another plate. */
+const PART_OF_LARGER = "The change is part of a larger edit";
+
+/** A plate with no lines on purpose: its change is part of a larger edit, shown elsewhere. */
+export function plateCaptionOnly(plate: Plate): boolean {
+  return plate.lines.length === 0 && plate.caption.startsWith(PART_OF_LARGER);
+}
+
+/** A plate the press is still setting: open, no lines yet, and not one that will have none. */
+export function plateWaiting(plate: Plate): boolean {
+  return plate.status === "open" && plate.lines.length === 0 && !plateCaptionOnly(plate);
+}
+
 /**
  * A plate on the right page. An open plate can be accepted, revised, rejected
  * or folded back; one the press is still asking about is allowed once or
@@ -53,20 +66,22 @@ export function PlatePage({
           </>
         ) : (
           <>
-            <div className="plate-frame">
-              {plate.lines.length === 0 ? (
-                <p className="plate-empty">The plate is still being set.</p>
-              ) : (
-                <ol className="diff">
-                  {plate.lines.map((line, index) => (
-                    <li key={index} className={`diff-line ${line.kind}`}>
-                      <span className="ln">{shownLineNumber(line)}</span>
-                      <code>{line.text || " "}</code>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
+            {plateCaptionOnly(plate) ? null : (
+              <div className="plate-frame">
+                {plate.lines.length === 0 ? (
+                  plateWaiting(plate) ? <p className="plate-empty">The plate is still being set.</p> : null
+                ) : (
+                  <ol className="diff">
+                    {plate.lines.map((line, index) => (
+                      <li key={index} className={`diff-line ${line.kind}`}>
+                        <span className="ln">{shownLineNumber(line)}</span>
+                        <code>{line.text || " "}</code>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            )}
             {ask && onAsk ? (
               <>
                 <p className="fig">{ask.title}</p>
