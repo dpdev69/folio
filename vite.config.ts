@@ -23,12 +23,19 @@ export default defineConfig({
 
 const ORIGINS = new Set(["http://127.0.0.1:47321", "http://localhost:47321"]);
 
+// One exit hook for the whole process, however many times the dev server restarts.
+let exitHooked = false;
+
 function pressPlugin(): Plugin {
   return {
     name: "folio-press",
     configureServer(server) {
-      server.httpServer?.once("close", stopPress);
-      process.once("exit", stopPress);
+      server.httpServer?.once("close", () => void stopPress());
+      if (!exitHooked) {
+        exitHooked = true;
+        // An exit handler cannot wait, so this one kills without the grace period.
+        process.once("exit", () => void stopPress(0));
+      }
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url ?? "/", "http://folio");
         if (!url.pathname.startsWith("/folio/")) return next();

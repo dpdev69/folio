@@ -30,8 +30,9 @@ npm run typecheck
 npm run dev
 ```
 
-The dev server is [http://127.0.0.1:47321](http://127.0.0.1:47321). In the browser the dev server stands in for the desktop shell: it exposes `/folio/press`, `/folio/serve`, `/folio/install`, `/folio/read`, `/folio/write`, and `/folio/remove`, so the title page can find, start, and install opencode on this machine and the book can read and write files. The press it starts uses the same `serve --stdio` flags, a random password, and state under `.folio/press` in the repository (it runs in `.folio/press/cwd`), and stops when the dev server does.
+The dev server is [http://127.0.0.1:47321](http://127.0.0.1:47321). In the browser the dev server stands in for the desktop shell: it exposes `/folio/press`, `/folio/serve`, `/folio/install`, `/folio/read`, `/folio/write`, and `/folio/remove`, so the title page can find, start, and install opencode on this machine and the book can read and write files. The press it starts uses the same `serve --stdio` flags, a random password, and state under `.folio/press` in the repository (its data, state, and cache folders; the process itself runs in `.folio/press/cwd`). It stops when the dev server does: the host closes the press's standard input, waits up to about a second and a half, then kills it.
 
+- The dev host looks for the binary in this order: `FOLIO_OPENCODE_BIN`, the fetched sidecar in `src-tauri/binaries/` (see Bundled press), `~/.opencode/bin/opencode`, then `opencode` on the `PATH`. (The desktop shell checks the sidecar beside the executable first.)
 - `FOLIO_OPENCODE_BIN=/path/to/opencode` picks the binary the dev host runs.
 - `FOLIO_PRESS_URL` and `FOLIO_PRESS_PASSWORD` make `npm run dev` attach to a press that is already running instead of starting one.
 - `npm run dev` followed by `?sample=1` opens the sample book (the flaky-login chapter) without a model.
@@ -65,11 +66,15 @@ The installer carries a pinned opencode CLI so the first launch needs no downloa
 npm run fetch-press
 npm run fetch-press -- --target x86_64-apple-darwin
 npm run fetch-press -- --binary /path/to/opencode
+npm run fetch-press -- --dest /some/folder
 ```
 
 - If the file is already there and reports the pinned version, nothing happens.
-- `--binary <path>` copies a binary you already have. On macOS the script also reuses `/Applications/OpenCode.app` when it reports the pinned version, which saves a download of about 85 MB (the unpacked binary is about 186 MB). Pass `--download` to skip that and fetch from the network.
-- Otherwise it downloads the release archive from `opencode.ai/files/bin/<version>/`, then from the GitHub release if that fails, unpacks it, and checks `--version`. A target that cannot run on this machine is downloaded without the check.
+- With no `--target`, the script uses `TAURI_ENV_TARGET_TRIPLE` (which `tauri build --target` sets), then this machine's triple.
+- `--dest <dir>` writes the sidecar into `<dir>` instead of `src-tauri/binaries`. The file name is the same.
+- `--binary <path>` copies a binary you already have. On macOS the script also reuses `/Applications/OpenCode.app` when it reports the pinned version, which saves the download (the archive is about 85 MB; the unpacked binary is about 186 MB). Pass `--download` to skip that and fetch from the network.
+- Otherwise it downloads the release archive from `opencode.ai/files/bin/<version>/`, then from the GitHub release if that fails, verifies it, unpacks it, and checks `--version`. A target that cannot run on this machine is downloaded without the version check.
+- Verification: `scripts/opencode-checksums.json` pins SHA-256 digests by version and then by archive name. A mismatch stops the script and nothing is installed. An absent pin only prints a warning along with the digest it computed, so the file can be extended. Upstream publishes no checksum file for the release, so the pin was computed from the archive itself; at present only `opencode-darwin-arm64.zip` for 2.0.28 is pinned. Pin the other archives, and every new version, before a public release.
 
 ## Book
 
@@ -78,7 +83,7 @@ npm run fetch-press -- --binary /path/to/opencode
 - The quill is the lined field at the foot of the page. Press Return twice to send; a single Return makes a new line.
 - Highlight a passage to write in the margin. The highlighted text is the context. The reply sits next to the note, and can replace the passage.
 - Tool calls are footnotes. A footnote that made a change ends with a link, "See Plate N", which opens that plate.
-- Changes are plates. A plate is the diff for one file, set on the right-hand page. Its running header reads, for example, "Plate I · src/greet.ts · +4 −1". When prose already fills the facing page, the plate does not cover it: a slip at the foot of the page reads "Plate I faces this page", and the plate opens when you click it or the footnote's link.
+- Changes are plates. A plate is the diff for one file, set on the right-hand page. Its running header reads, for example, "Plate I · src/greet.ts · +4 −1". When prose already fills the facing page, the plate does not cover it: a slip at the foot of the page reads "Plate I faces this page — open it", and the plate opens when you click it or the footnote's link.
 - **Accept** marks the plate as set. The edit is already in your files, so this changes only the plate's caption.
 - **Revise** puts "Revise the change in <file>." in the quill so you can say what you want instead.
 - **Reject** reverse-applies that plate's own patch to the file, writes it back through Folio, and tells the press, with a note that the change was declined on purpose, so it does not make it again. A later edit to the same file is left alone; if the file has changed since the plate was set, Folio leaves it as it is and says so. A file the plate created is removed (not left empty), and a file it removed is written back from the patch; removal goes through the same inside-the-book guard as writes (`remove_file` in the shell, `POST /folio/remove` in dev), since the press has no route for it. Folio does not use the press's session revert, because that would delete the chapter's history.

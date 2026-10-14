@@ -75,14 +75,32 @@ export async function servePress(): Promise<Served> {
   }
 }
 
-/** Stop the press this host started. Vite calls it as it closes. */
-export function stopPress(): void {
+const GRACE_MS = 1500;
+
+/**
+ * Stop the press this host started: close its stdin (which `serve --stdio` treats
+ * as the signal to stop), wait up to `graceMs` for it to exit, then kill it.
+ * Pass 0 where the process cannot wait (a "process exit" handler): it kills at once.
+ */
+export function stopPress(graceMs: number = GRACE_MS): Promise<void> {
   const child = running?.child;
   running = null;
-  if (child && child.exitCode == null) {
-    child.stdin?.end();
+  if (!child || child.exitCode != null || child.signalCode != null) return Promise.resolve();
+  child.stdin?.end();
+  if (graceMs <= 0) {
     child.kill();
+    return Promise.resolve();
   }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve();
+    }, graceMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 async function start(): Promise<Running> {

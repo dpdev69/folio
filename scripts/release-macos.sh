@@ -55,8 +55,14 @@ echo "Built Folio $version for $target"
 echo "  app: $app"
 echo "  dmg: $dmg"
 
+# Ask the app itself, not the environment: a Developer ID signature has an
+# Authority line and a TeamIdentifier; a linker-signed (ad hoc) build has
+# "Signature=adhoc" and TeamIdentifier=not set.
 signed=0
-if [ -n "${APPLE_SIGNING_IDENTITY:-}" ] || [ -n "${APPLE_CERTIFICATE:-}" ]; then
+details="$(codesign -dv --verbose=2 "$app" 2>&1 || true)"
+if ! grep -q 'Signature=adhoc' <<<"$details" \
+  && grep -q '^Authority=' <<<"$details" \
+  && ! grep -q 'TeamIdentifier=not set' <<<"$details"; then
   signed=1
 fi
 
@@ -79,7 +85,8 @@ if [ "$signed" = 1 ]; then
   echo "  codesign --verify --deep --strict --verbose=2 \"$app\""
   echo "  spctl --assess --type execute --verbose \"$app\""
   if [ "$notarized" = 1 ]; then
-    echo "  xcrun stapler validate \"$dmg\""
+    echo "  xcrun stapler validate \"$app\""
+    echo "  xcrun stapler validate \"$dmg\"    # only if the dmg was notarized and stapled too"
   fi
 else
   cat <<CMDS
@@ -106,9 +113,14 @@ rebuilt from the signed app, because the dmg built above holds the unsigned one.
   codesign --verify --deep --strict --verbose=2 "\$APP"
 
   # 2. Notarize the app from a zip, then staple the app.
-  ditto -c -k --keepParent "\$APP" /tmp/Folio-notarize.zip
-  xcrun notarytool submit /tmp/Folio-notarize.zip \\
+  ZIP="\$(mktemp -d)/Folio-notarize.zip"
+  ditto -c -k --keepParent "\$APP" "\$ZIP"
+  # With an Apple ID:
+  xcrun notarytool submit "\$ZIP" \\
     --apple-id "\$APPLE_ID" --password "\$APPLE_PASSWORD" --team-id "\$APPLE_TEAM_ID" --wait
+  # Or with an App Store Connect API key:
+  #   xcrun notarytool submit "\$ZIP" \\
+  #     --key "\$APPLE_API_KEY_PATH" --key-id "\$APPLE_API_KEY" --issuer "\$APPLE_API_ISSUER" --wait
   xcrun stapler staple "\$APP"
 
   # 3. Rebuild the dmg from the stapled app, sign it, notarize it, staple it.
@@ -120,6 +132,9 @@ rebuilt from the signed app, because the dmg built above holds the unsigned one.
   codesign --force --timestamp --sign "\$IDENTITY" "\$DMG"
   xcrun notarytool submit "\$DMG" \\
     --apple-id "\$APPLE_ID" --password "\$APPLE_PASSWORD" --team-id "\$APPLE_TEAM_ID" --wait
+  #   (API key form: --key "\$APPLE_API_KEY_PATH" --key-id "\$APPLE_API_KEY" --issuer "\$APPLE_API_ISSUER")
   xcrun stapler staple "\$DMG"
+  xcrun stapler validate "\$APP"
+  xcrun stapler validate "\$DMG"
 CMDS
 fi

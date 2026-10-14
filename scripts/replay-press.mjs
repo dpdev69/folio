@@ -10,12 +10,16 @@
 
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "book", "__fixtures__");
 const VERSION = "2.0.28";
-const DIRECTORY = "/private/tmp/claude-501/-Users-me-folio/e9197d91-01d7-4355-b22f-541229eaf5c7/scratchpad/v2/repo";
+// The folder the replayed sessions claim to belong to. It is only a label; nothing is read from it.
+// Override with FOLIO_REPLAY_DIRECTORY.
+export const REPLAY_DIRECTORY = process.env.FOLIO_REPLAY_DIRECTORY ?? join(tmpdir(), "folio-replay", "repo");
+const DIRECTORY = REPLAY_DIRECTORY;
 const SESSION = "ses_ec87ce784ffeufwpMch0VZPNfx";
 const PROMPT_ID = "msg_1378318cd0011en9zAGWcvx4bC";
 

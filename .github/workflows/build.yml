@@ -3,6 +3,12 @@ name: build
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      intel:
+        description: Also build the Intel macOS app and dmg (x86_64-apple-darwin)
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -51,11 +57,19 @@ jobs:
         if: matrix.os == 'macos-latest'
         # The path guard, the remove guard and the readiness line; the live-press test stays ignored.
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      # No signing secrets here: Linux and Windows jobs never see the Apple ones.
       - name: Bundle
+        if: matrix.os != 'macos-latest'
         shell: bash
-        # Tauri signs and notarizes on macOS only when these secrets exist.
-        # Without them the build is unsigned (linker-signed only), as before. Secrets that
-        # are not set arrive as empty strings, so empty ones are unset first.
+        run: npx tauri build --bundles ${{ matrix.bundles }}
+      # Only this step receives the Apple secrets. Tauri signs and notarizes when they
+      # exist; without them the build is unsigned (linker-signed only). Secrets that
+      # are not set arrive as empty strings, so empty ones are unset first.
+      # GitHub runners set CI, which makes the dmg bundler skip its Finder styling, so
+      # CI dmgs have no icon layout (they still hold Folio.app and the Applications link).
+      - name: Bundle (macOS, signs when secrets exist)
+        if: matrix.os == 'macos-latest'
+        shell: bash
         run: |
           for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             if [ -z "${!v:-}" ]; then unset "$v"; fi
@@ -73,4 +87,32 @@ jobs:
           name: folio-${{ matrix.os }}
           path: |
             src-tauri/target/release/bundle/**
+          if-no-files-found: error
+
+  # Run on demand (Actions, "Run workflow", tick intel): cross-builds the Intel app and dmg
+  # on the Apple-silicon runner. Unsigned, so it carries no secrets.
+  desktop-intel:
+    name: desktop (macos, x86_64)
+    if: github.event_name == 'workflow_dispatch' && inputs.intel
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - run: npm ci
+      - name: Fetch the press
+        run: npm run fetch-press -- --target x86_64-apple-darwin
+      - name: Bundle
+        run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: folio-macos-x86_64
+          path: |
+            src-tauri/target/x86_64-apple-darwin/release/bundle/**
           if-no-files-found: error

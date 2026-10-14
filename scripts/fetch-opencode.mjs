@@ -6,9 +6,13 @@
 //                                        [--binary <path>] [--dest <dir>] [--download]
 //
 // --download skips the local app fast path and always fetches from the network.
+// With no --target, TAURI_ENV_TARGET_TRIPLE (set by `tauri build --target`) is used,
+// then this machine's triple. Downloaded archives are checked against
+// scripts/opencode-checksums.json: an absent pin warns, a mismatch fails.
 
 import { execFileSync } from "node:child_process";
-import { createWriteStream, existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream, existsSync, readFileSync } from "node:fs";
 import { chmod, copyFile, mkdir, mkdtemp, readdir, rename, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -22,10 +26,55 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MAC_APP_BINARY = "/Applications/OpenCode.app/Contents/Resources/opencode-cli";
 const TIMEOUT_MS = 10 * 60 * 1000;
 
-function parseArgs(argv) {
+/** Quote a string as a PowerShell single-quoted literal: nothing interpolates, quotes are doubled. */
+export function psQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+/** The PowerShell command that unpacks a zip, with both paths quoted safely. */
+export function expandArchiveCommand(archive, into) {
+  return `Expand-Archive -LiteralPath ${psQuote(archive)} -DestinationPath ${psQuote(into)} -Force`;
+}
+
+/** The target triple: --target, then TAURI_ENV_TARGET_TRIPLE, then the host's. */
+export function resolveTriple(args, env, host) {
+  return args.target || env.TAURI_ENV_TARGET_TRIPLE || host;
+}
+
+/** The per-OS file name an installed sidecar gets. */
+export function sidecarName(triple, exe) {
+  return `opencode-cli-${triple}${exe.endsWith(".exe") ? ".exe" : ""}`;
+}
+
+/**
+ * Compare an archive's SHA-256 with the pins table ({ [version]: { [asset]: hex } }).
+ * Returns { status: "ok" | "missing" | "mismatch", expected? }. Absent is not failure; mismatch is.
+ */
+export function checkChecksum(actual, version, assetName, table) {
+  const expected = table?.[version]?.[assetName];
+  if (!expected) return { status: "missing" };
+  if (String(expected).toLowerCase() === String(actual).toLowerCase()) return { status: "ok", expected };
+  return { status: "mismatch", expected };
+}
+
+function loadChecksums() {
+  return JSON.parse(readFileSync(join(root, "scripts", "opencode-checksums.json"), "utf8"));
+}
+
+async function sha256(file) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+export function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
+    if (flag === "--help" || flag === "-h") {
+      out.help = true;
+      continue;
+    }
     if (flag === "--download") {
       out.download = true;
       continue;
@@ -40,7 +89,7 @@ function parseArgs(argv) {
   return out;
 }
 
-function pinnedVersion() {
+export function pinnedVersion() {
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   const version = pkg.opencode?.version;
   if (!version) throw new Error('package.json has no "opencode.version".');
@@ -105,11 +154,7 @@ async function download(urls, file) {
 
 function extract(kind, archive, into) {
   if (kind === "zip" && process.platform === "win32") {
-    execFileSync(
-      "powershell",
-      ["-NoProfile", "-Command", `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${into}' -Force`],
-      { stdio: "inherit" },
-    );
+    execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", expandArchiveCommand(archive, into)], { stdio: "inherit" });
   } else if (kind === "zip") {
     execFileSync("unzip", ["-q", "-o", archive, "-d", into], { stdio: "inherit" });
   } else {
@@ -132,12 +177,16 @@ async function findFile(dir, name) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log("Usage: node scripts/fetch-opencode.mjs [--target <triple>] [--version <v>] [--binary <path>] [--dest <dir>] [--download]");
+    return;
+  }
   const version = args.version ?? pinnedVersion();
   const host = hostTriple();
-  const triple = args.target ?? host;
+  const triple = resolveTriple(args, process.env, host);
   const asset = assetFor(triple);
   const dir = args.dest ? resolve(args.dest) : join(root, "src-tauri", "binaries");
-  const destination = join(dir, `opencode-cli-${triple}${asset.exe.endsWith(".exe") ? ".exe" : ""}`);
+  const destination = join(dir, sidecarName(triple, asset.exe));
   const runnable = triple === host;
 
   if (existsSync(destination) && runnable && reportedVersion(destination) === version) {
@@ -162,6 +211,16 @@ async function main() {
     const unpacked = join(work, "unpacked");
     await mkdir(unpacked);
     await download(sources(version, asset.name), archive);
+    const digest = await sha256(archive);
+    const check = checkChecksum(digest, version, asset.name, loadChecksums());
+    if (check.status === "mismatch") {
+      throw new Error(`SHA-256 of ${asset.name} is ${digest} but scripts/opencode-checksums.json pins ${check.expected}. Refusing to use it.`);
+    }
+    if (check.status === "missing") {
+      console.error(`warning: no SHA-256 pin for ${asset.name} ${version}; the download is unverified (sha256 ${digest}). Add it to scripts/opencode-checksums.json.`);
+    } else {
+      console.error(`sha256 verified for ${asset.name}`);
+    }
     extract(asset.kind, archive, unpacked);
     const found = await findFile(unpacked, asset.exe);
     if (!found) throw new Error(`${asset.name} did not contain ${asset.exe}.`);
@@ -183,7 +242,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(`fetch-opencode: ${error.message}`);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main().catch((error) => {
+    console.error(`fetch-opencode: ${error.message}`);
+    process.exit(1);
+  });
+}
