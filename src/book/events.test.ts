@@ -661,6 +661,22 @@ describe("an ask about an edit", () => {
   });
 });
 
+describe("a run that ends", () => {
+  it("takes away asks and questions the press no longer waits on", () => {
+    const waiting = play(book(), [
+      ev("session.execution.started"),
+      ev("permission.asked", { id: "per_1", action: "shell", resources: ["git show"] }),
+      ev("form.created", { form: { id: "frm_1", sessionID: "ses_1", title: "Q", fields: [] } }),
+    ]);
+    expect(only(waiting).asks).toHaveLength(1);
+    expect(only(waiting).forms).toHaveLength(1);
+    for (const end of ["session.execution.interrupted", "session.execution.succeeded", "session.execution.failed"]) {
+      const settled = only(applyEvent(waiting, ev(end, { reason: "user", error: { type: "x" } })));
+      expect([settled.asks, settled.forms]).toEqual([[], []]);
+    }
+  });
+});
+
 describe("margin notes from the press", () => {
   const COMPOSED = "About this passage:\n\n> the clock was frozen\n\nWhy freeze it?";
   const noted = (): Book => ({

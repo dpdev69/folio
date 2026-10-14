@@ -244,16 +244,16 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   border: 0; background: transparent; color: var(--terra); padding: 0 4px; font-size: inherit;
 }
 .ask .quiet, .plate-actions button:not(:first-child) { color: var(--soft); }
-.ask .dot, .form-actions .dot { color: var(--faint); }
+.ask .dot, .form-actions .dot { color: var(--faint); margin: 0 4px; }
 
 /* A question from the press, at the foot of the left page. */
 .ask-form {
-  max-height: 46%; overflow: auto;
   margin: 0 0 6px; padding: 8px 0 4px;
   border-top: 1px solid var(--rule);
   font-size: 15px; color: var(--soft); text-align: center;
 }
-.foot:has(.ask-form) { max-height: 52%; overflow: auto; }
+/* The question may take most of the page while it waits, never all of it. */
+.foot:has(.ask-form) { max-height: 62%; overflow: auto; }
 .form-field { border: 0; margin: 0 0 6px; padding: 0; min-width: 0; }
 .form-field legend {
   margin: 0 auto; padding: 0;

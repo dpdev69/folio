@@ -166,11 +166,14 @@ function retitle(chapter: Chapter, title: string | undefined): Chapter {
   return { ...chapter, title: title!, untitled: false };
 }
 
-/** The run is over: idle, and a margin note still waiting will not get its reply. */
+/** The run is over: idle, nothing left to answer, and a margin note still waiting will not get its reply. */
 function settle(chapter: Chapter): Chapter {
   return {
     ...chapter,
     busy: false,
+    // The press asks only while it runs; an ask left over from a stopped run cannot be answered.
+    asks: chapter.asks.length ? [] : chapter.asks,
+    forms: chapter.forms.length ? [] : chapter.forms,
     notes: chapter.notes.some((n) => n.pending) ? chapter.notes.map((n) => (n.pending ? { ...n, pending: false } : n)) : chapter.notes,
   };
 }
