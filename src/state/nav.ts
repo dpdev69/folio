@@ -3,10 +3,12 @@ export type Nav = {
   spread: number;
   margin: boolean;
   curl: null | { to: number; forward: boolean };
+  /** The plate the reader opened over the right page; a turn folds it back. */
+  plateOpen: string | null;
 };
 
 export function initialNav(spread = 0): Nav {
-  return { view: "reading", spread, margin: false, curl: null };
+  return { view: "reading", spread, margin: false, curl: null, plateOpen: null };
 }
 
 export function reduceNav(
@@ -21,7 +23,9 @@ export function reduceNav(
     | { type: "jump"; spread: number }
     | { type: "turn"; forward: boolean; spreadCount: number }
     | { type: "curl-done" }
-    | { type: "margin"; open: boolean },
+    | { type: "margin"; open: boolean }
+    | { type: "open-plate"; id: string }
+    | { type: "fold-plate" },
 ): { nav: Nav; effect?: "new-chapter" } {
   switch (action.type) {
     case "contents":
@@ -35,11 +39,17 @@ export function reduceNav(
     case "desk":
       return { nav: { ...initialNav(), view: "desk" } };
     case "open-book":
-      return { nav: { view: "reading", spread: action.spread, margin: false, curl: null } };
+      return { nav: initialNav(action.spread) };
     case "jump": {
       if (nav.curl) return { nav };
-      return { nav: { ...nav, view: "reading", margin: false, curl: { to: action.spread, forward: action.spread > nav.spread } } };
+      return {
+        nav: { ...nav, view: "reading", margin: false, plateOpen: null, curl: { to: action.spread, forward: action.spread > nav.spread } },
+      };
     }
+    case "open-plate":
+      return { nav: { ...nav, plateOpen: action.id } };
+    case "fold-plate":
+      return { nav: { ...nav, plateOpen: null } };
     case "margin":
       return { nav: { ...nav, margin: action.open } };
     case "curl-done":
@@ -47,13 +57,15 @@ export function reduceNav(
       return { nav: { ...nav, spread: nav.curl.to, curl: null, view: "reading" } };
     case "turn": {
       if (nav.curl || nav.view !== "reading") return { nav };
+      const folded = { ...nav, plateOpen: null };
       if (action.forward) {
+        // Only the last spread of the book (the last chapter's) opens a new chapter.
         const last = Math.max(0, action.spreadCount - 1);
-        if (nav.spread >= last) return { nav, effect: "new-chapter" };
-        return { nav: { ...nav, margin: false, curl: { to: nav.spread + 1, forward: true } } };
+        if (nav.spread >= last) return { nav: folded, effect: "new-chapter" };
+        return { nav: { ...folded, margin: false, curl: { to: nav.spread + 1, forward: true } } };
       }
-      if (nav.spread <= 0) return { nav };
-      return { nav: { ...nav, margin: false, curl: { to: nav.spread - 1, forward: false } } };
+      if (nav.spread <= 0) return { nav: folded };
+      return { nav: { ...folded, margin: false, curl: { to: nav.spread - 1, forward: false } } };
     }
     default:
       return { nav };

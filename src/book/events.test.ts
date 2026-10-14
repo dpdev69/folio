@@ -564,6 +564,26 @@ describe("page turns", () => {
     expect(step.effect).toBe("new-chapter");
     expect(step.nav.spread).toBe(1);
   });
+
+  it("opens a plate over the right page and folds it back", () => {
+    const opened = reduceNav(initialNav(1), { type: "open-plate", id: "plate-1" }).nav;
+    expect(opened).toMatchObject({ spread: 1, plateOpen: "plate-1", curl: null });
+    expect(reduceNav(opened, { type: "fold-plate" }).nav.plateOpen).toBeNull();
+    expect(initialNav(0).plateOpen).toBeNull();
+  });
+
+  it("closes an open plate on a turn either way, and asks for a chapter only past the last spread", () => {
+    const opened = reduceNav(initialNav(1), { type: "open-plate", id: "plate-1" }).nav;
+    const forward = reduceNav(opened, { type: "turn", forward: true, spreadCount: 3 });
+    expect(forward.effect).toBeUndefined();
+    expect(forward.nav).toMatchObject({ plateOpen: null, curl: { to: 2, forward: true } });
+    const back = reduceNav(opened, { type: "turn", forward: false, spreadCount: 3 });
+    expect(back.nav).toMatchObject({ plateOpen: null, curl: { to: 0, forward: false } });
+    const last = reduceNav(opened, { type: "turn", forward: true, spreadCount: 2 });
+    expect(last.effect).toBe("new-chapter");
+    expect(last.nav.plateOpen).toBeNull();
+    expect(reduceNav(opened, { type: "jump", spread: 0 }).nav.plateOpen).toBeNull();
+  });
 });
 
 describe("footnote anchors", () => {

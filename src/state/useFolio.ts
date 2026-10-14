@@ -33,7 +33,7 @@ export type EngineState = "off" | "connecting" | "ready" | "error";
 
 export function useFolio() {
   const [book, setBook] = useState<Book | null>(null);
-  const [nav, setNav] = useState<Nav>({ view: "desk", spread: 0, margin: false, curl: null });
+  const [nav, setNav] = useState<Nav>({ ...initialNav(), view: "desk" });
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [press, setPress] = useState<PressPhase>({ phase: "checking" });
   const [providerId, setProviderId] = useState("openai");
@@ -225,7 +225,7 @@ export function useFolio() {
     setShowPath(false);
     setMenuOpen(false);
     if (spread != null && Number.isFinite(spread)) {
-      setNav({ view: "reading", spread, margin: false, curl: null });
+      setNav(initialNav(spread));
       return;
     }
     jumpRef.current = "ch-iv";
@@ -824,6 +824,8 @@ export function useFolio() {
     searchHits,
     curlDone: () => setNav(reduceNav(nav, { type: "curl-done" }).nav),
     closeMargin: () => setNav(reduceNav(nav, { type: "margin", open: false }).nav),
+    openPlate: (id: string) => setNav(reduceNav(nav, { type: "open-plate", id }).nav),
+    foldOpenPlate: () => setNav(reduceNav(nav, { type: "fold-plate" }).nav),
     foldPlate: (id: string) => mutatePlate(id, (plate) => ({ ...plate, folded: !plate.folded })),
     acceptPlate: (id: string) => mutatePlate(id, (plate) => ({ ...plate, status: "accepted" })),
     rejectPlate: (id: string) => void rejectPlate(id),
