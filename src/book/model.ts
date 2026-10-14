@@ -55,6 +55,8 @@ export type MarginNote = {
   kept?: boolean;
   replaced?: boolean;
   pending?: boolean;
+  /** The user message the note was sent as; only text of that turn is its reply. */
+  messageId?: string;
 };
 
 export type PermissionAsk = {

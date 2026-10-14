@@ -90,20 +90,29 @@ describe("chapterFromMessages", () => {
       ]);
       expect(read.blocks.filter((b) => b.marginal).map((b) => b.id)).toEqual(["msg_u2", "msg_a2:t0"]);
       expect(read.notes).toEqual([
-        { id: "note-msg_u2", quote: "the clock was frozen", prompt: "Why freeze it?", reply: "So the token's time is fixed.", pending: false },
+        {
+          id: "note-msg_u2",
+          quote: "the clock was frozen",
+          prompt: "Why freeze it?",
+          reply: "So the token's time is fixed.",
+          pending: false,
+          messageId: "msg_u2",
+        },
       ]);
     });
 
     it("gives the reply to a note the chapter already holds for the same passage", () => {
       const held = { id: "note_1", quote: "the clock was frozen", prompt: "Why freeze it?", kept: true };
       const read = chapterFromMessages({ ...empty("ses_1"), notes: [held] }, history);
-      expect(read.notes).toEqual([{ ...held, reply: "So the token's time is fixed.", pending: false }]);
+      expect(read.notes).toEqual([{ ...held, reply: "So the token's time is fixed.", pending: false, messageId: "msg_u2" }]);
     });
 
     it("lets a note that was never answered go, so the next reply stays in the main flow", () => {
       const unanswered = [history[0], history[1], history[2], history[4], history[5]];
       const read = chapterFromMessages(empty("ses_1"), unanswered);
-      expect(read.notes).toEqual([{ id: "note-msg_u2", quote: "the clock was frozen", prompt: "Why freeze it?", pending: false }]);
+      expect(read.notes).toEqual([
+        { id: "note-msg_u2", quote: "the clock was frozen", prompt: "Why freeze it?", pending: false, messageId: "msg_u2" },
+      ]);
       expect(read.blocks.find((b) => b.id === "msg_a3:t0")?.marginal).toBe(false);
     });
   });

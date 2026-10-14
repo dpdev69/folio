@@ -9,7 +9,7 @@ import {
   type ProseBlock,
 } from "./model";
 import { applyDiff, dropPlate, filesOf, toolPlate } from "./plates";
-import { NOTE_PREFIX } from "./notes";
+import { NOTE_PREFIX, parseNote } from "./notes";
 import { footnoteSentence, isEdit, type ToolLike } from "./tools";
 
 /**
@@ -66,11 +66,11 @@ function reduceChapter(chapter: Chapter, type: string, data: Data, directory?: s
     case "session.step.ended":
       return Array.isArray(data.files) && data.files.length && !chapter.diffStale ? { ...chapter, diffStale: true } : chapter;
     case "session.text.started":
-      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), "", "grow") : chapter;
+      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), "", "grow", aid) : chapter;
     case "session.text.delta":
-      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), stringOf(data.delta) ?? "", "append") : chapter;
+      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), stringOf(data.delta) ?? "", "append", aid) : chapter;
     case "session.text.ended":
-      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), stringOf(data.text) ?? "", "end") : chapter;
+      return aid && ordinal != null ? setText(chapter, textBlockId(aid, ordinal), stringOf(data.text) ?? "", "end", aid) : chapter;
     case "session.tool.input.started":
       // Only this event names the tool; the rest of the input stream is ignored.
       return id ? nameTool(chapter, id, stringOf(data.name)) : chapter;
@@ -193,7 +193,20 @@ function enqueue(chapter: Chapter, inboxID: string | undefined, item: Data | und
   if (local) return renameBlock(chapter, local.id, inboxID);
   // A waiting margin note's own question belongs in the margin, with its reply.
   const marginal = text.startsWith(NOTE_PREFIX) && chapter.notes.some((n) => n.pending);
-  return { ...chapter, blocks: [...chapter.blocks, { id: inboxID, voice: "ink", text, ...(marginal ? { marginal } : {}) }] };
+  const next: Chapter = { ...chapter, blocks: [...chapter.blocks, { id: inboxID, voice: "ink", text, ...(marginal ? { marginal } : {}) }] };
+  if (!marginal) return next;
+  // The stream can name the note's message before the prompt call returns.
+  const asked = parseNote(text);
+  const waiting = chapter.notes.filter((n) => n.pending && !n.messageId);
+  const note = waiting.find((n) => n.quote === asked?.quote && n.prompt === asked?.prompt) ?? waiting[0];
+  return note ? noteSent(next, note.id, inboxID) : next;
+}
+
+/** The press took a margin note as this user message; the text of that turn is its reply. */
+export function noteSent(chapter: Chapter, noteId: string, messageId: string): Chapter {
+  const note = chapter.notes.find((n) => n.id === noteId);
+  if (!note || note.messageId === messageId) return chapter;
+  return { ...chapter, notes: chapter.notes.map((n) => (n.id === noteId ? { ...n, messageId } : n)) };
 }
 
 /**
@@ -231,10 +244,17 @@ export function addInk(chapter: Chapter, id: string, text: string, marginal = fa
 
 /**
  * Set a prose block's text. "grow" and "end" never shorten it; "end" also
- * closes the margin note the block answers. A block written while a note waits
- * is that note's reply and stays out of the main flow.
+ * closes the margin note the block answers. A block of the turn a waiting note
+ * was sent as (its assistant message's turn is the note's own message) is that
+ * note's reply and stays out of the main flow; any other turn's text does not.
  */
-export function setText(chapter: Chapter, id: string, text: string, mode: "append" | "grow" | "end"): Chapter {
+export function setText(
+  chapter: Chapter,
+  id: string,
+  text: string,
+  mode: "append" | "grow" | "end",
+  assistantMessageID?: string,
+): Chapter {
   const blocks = chapter.blocks.slice();
   const index = blocks.findIndex((b) => b.id === id);
   const prev = index >= 0 ? blocks[index] : undefined;
@@ -242,12 +262,14 @@ export function setText(chapter: Chapter, id: string, text: string, mode: "appen
   if (!prev) next = text;
   else if (mode === "append") next = prev.text + text;
   else next = text.length >= prev.text.length ? text : prev.text;
-  const marginal = prev ? Boolean(prev.marginal) : chapter.notes.some((n) => n.pending);
+  const turn = assistantMessageID ? chapter.turns?.[assistantMessageID] : undefined;
+  const owner = turn ? chapter.notes.find((n) => n.pending && n.messageId === turn) : undefined;
+  const marginal = prev ? Boolean(prev.marginal) : Boolean(owner);
   const closes = marginal && mode === "end" && Boolean(next.trim());
   if (prev && next === prev.text && !closes) return chapter;
   if (prev) blocks[index] = { ...prev, text: next };
   else blocks.push({ id, voice: "prose", text: next, marginal });
-  const pending = marginal ? chapter.notes.find((n) => n.pending) : undefined;
+  const pending = marginal ? owner : undefined;
   const notes =
     pending && next.trim()
       ? chapter.notes.map((n) => (n.id === pending.id ? { ...n, reply: next, pending: !closes } : n))

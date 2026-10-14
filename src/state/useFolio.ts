@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { applyEvent, appendPrompt, MODEL_GONE, renameBlock } from "../book/events";
+import { applyEvent, appendPrompt, MODEL_GONE, noteSent, renameBlock } from "../book/events";
 import { paginateBook, type LaidPage } from "../book/paginate";
 import { chapterRoman, displayTitle, isUntitled, type Book, type Chapter, type Plate } from "../book/model";
 import { SAMPLE_BREAKS, SAMPLE_DRAFT, sampleBook, sampleNoteReply, sampleReply } from "../book/sample";
@@ -464,15 +464,21 @@ export function useFolio() {
    * Send a prompt. The press answers with the user message id; the ink line
    * set as `local-…` takes that name (the stream usually renames it first).
    */
-  async function sendPrompt(chapterId: string, text: string, localId: string | null, failure: string) {
+  async function sendPrompt(chapterId: string, text: string, localId: string | null, failure: string): Promise<string | null> {
     const client = clientRef.current;
-    if (!client) return;
+    if (!client) {
+      setNotice("The press is not attached.");
+      updateChapter(chapterId, (current) => ({ ...current, busy: false }));
+      return null;
+    }
     try {
       const id = await client.prompt(chapterId, text);
       if (localId) updateChapter(chapterId, (current) => renameBlock(current, localId, id));
+      return id;
     } catch (error) {
       setNotice(messageOf(error, failure));
       updateChapter(chapterId, (current) => ({ ...current, busy: false }));
+      return null;
     }
   }
 
@@ -497,6 +503,11 @@ export function useFolio() {
   function sendNote(quote: string, prompt: string) {
     const chapter = chapterForSpread(nav.spread);
     if (!book || !chapter || !quote.trim() || !prompt.trim()) return;
+    // A note sent mid-turn would be steered into the turn and take its next words as a reply.
+    if (chapter.busy) {
+      setNotice("The press is still writing this chapter.");
+      return;
+    }
     const noteId = `note-${Date.now()}`;
     const composed = composeNote(quote, prompt);
     updateChapter(chapter.id, (current) => ({
@@ -515,7 +526,11 @@ export function useFolio() {
       streamInto(chapter.id, replyId, sampleNoteReply(prompt), true);
       return;
     }
-    void sendPrompt(chapter.id, composed, null, "The margin note was not sent.");
+    void sendPrompt(chapter.id, composed, null, "The margin note was not sent.").then((id) => {
+      // Only the turn this message begins writes the note's reply.
+      if (id) updateChapter(chapter.id, (current) => noteSent(current, noteId, id));
+      else updateChapter(chapter.id, (current) => ({ ...current, notes: current.notes.map((n) => (n.id === noteId ? { ...n, pending: false } : n)) }));
+    });
   }
 
   function turn(forward: boolean) {

@@ -513,10 +513,50 @@ describe("margin notes", () => {
   function noted(): Book {
     return {
       ...book(),
-      chapters: [{ ...book().chapters[0], notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true }] }],
+      chapters: [
+        {
+          ...book().chapters[0],
+          notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true, messageId: "msg_note" }],
+          turns: { m2: "msg_note" },
+        },
+      ],
     };
   }
   const text = (type: string, fields: Record<string, unknown>) => ev(type, { assistantMessageID: "m2", ordinal: 0, ...fields });
+
+  it("gives a note only the text of its own turn; the main reply still writing stays in the flow", () => {
+    // The main turn (msg_main) is still writing when the note is sent.
+    const start: Book = {
+      ...book(),
+      chapters: [
+        {
+          ...book().chapters[0],
+          blocks: [{ id: "msg_main", voice: "ink", text: "Fix the test." }],
+          notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true }],
+          turns: { m1: "msg_main" },
+        },
+      ],
+    };
+    let next = applyEvent(start, ev("session.text.started", { assistantMessageID: "m1", ordinal: 1 }));
+    next = applyEvent(next, ev("session.text.ended", { assistantMessageID: "m1", ordinal: 1, text: "The test passes now." }));
+    expect(next.chapters[0].blocks[1]).toMatchObject({ id: "m1:t1", marginal: false, text: "The test passes now." });
+    expect(next.chapters[0].notes[0]).toMatchObject({ pending: true });
+    expect(next.chapters[0].notes[0].reply).toBeUndefined();
+  });
+
+  it("learns a note's message id from its own prompt in the inbox, and gives that turn's text to it", () => {
+    const composed = "About this passage:\n\n> mirrors\n\nwhy?";
+    const start: Book = {
+      ...book(),
+      chapters: [{ ...book().chapters[0], notes: [{ id: "note_1", quote: "mirrors", prompt: "why?", pending: true }] }],
+    };
+    let next = applyEvent(start, ev("session.inbox.enqueued", { inboxID: "msg_n", item: { type: "user", payload: { text: composed } } }));
+    expect(next.chapters[0].notes[0].messageId).toBe("msg_n");
+    next = applyEvent(next, ev("session.step.started", { assistantMessageID: "m9" }));
+    next = applyEvent(next, ev("session.text.ended", { assistantMessageID: "m9", ordinal: 0, text: "Because greet does." }));
+    expect(next.chapters[0].blocks.find((b) => b.id === "m9:t0")).toMatchObject({ marginal: true });
+    expect(next.chapters[0].notes[0]).toMatchObject({ pending: false, reply: "Because greet does." });
+  });
 
   it("keeps a note open through the empty start and closes it with the full reply", () => {
     let next = applyEvent(noted(), text("session.text.started", {}));

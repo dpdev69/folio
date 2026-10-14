@@ -50,10 +50,11 @@ function openNote(chapter: Chapter, messageId: string, asked: { quote: string; p
   const same = chapter.notes.filter((n) => n.quote === asked.quote);
   const held = same.find((n) => n.prompt === asked.prompt) ?? same[0];
   if (held) {
-    return { chapter: { ...chapter, notes: chapter.notes.map((n) => (n.id === held.id ? { ...n, pending: true } : n)) }, id: held.id };
+    const notes = chapter.notes.map((n) => (n.id === held.id ? { ...n, pending: true, messageId } : n));
+    return { chapter: { ...chapter, notes }, id: held.id };
   }
   const id = `note-${messageId}`;
-  return { chapter: { ...chapter, notes: [...chapter.notes, { id, ...asked, pending: true }] }, id };
+  return { chapter: { ...chapter, notes: [...chapter.notes, { id, ...asked, pending: true, messageId }] }, id };
 }
 
 /** A note from history that got no reply stops waiting, so later prose stays in the main flow. */
@@ -68,7 +69,7 @@ function assistant(chapter: Chapter, messageId: string, content: unknown, direct
   for (const raw of Array.isArray(content) ? content : []) {
     const item = recordOf(raw);
     if (item?.type === "text") {
-      next = setText(next, textBlockId(messageId, ordinal), stringOf(item.text) ?? "", "end");
+      next = setText(next, textBlockId(messageId, ordinal), stringOf(item.text) ?? "", "end", messageId);
       ordinal += 1;
     } else if (item?.type === "tool") {
       next = tool(next, messageId, item, directory);
