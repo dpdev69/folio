@@ -8,7 +8,7 @@
   --soft: #5c5348;
   --faint: #9a8e80;
   --rule: #e4d9c8;
-  --terra: #c45c38;
+  --terra: #ac5131;
   --terra-deep: #9a452c;
   --ribbon: #c44732;
   --quill: #1c3d72;
@@ -17,7 +17,7 @@
   --plate: #fbf8f2;
   --plate-rule: #e7dccb;
   --hint: #c4b8a8;
-  --title: #6e655c;
+  --title: #665e56;
   --chip: #8ea0c0;
   --grain: transparent;
   --face: "EB Garamond", Palatino, "Palatino Linotype", serif;
@@ -37,12 +37,26 @@
   --lh: 29px;
   --drop-w: 40px;
   --margin-x: 48px;
+  /* Motion. Fast for what the reader caused directly, slow only for the physical turn. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-paper: cubic-bezier(0.22, 0.7, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur: 240ms;
+  --dur-slow: 450ms;
   color: var(--ink);
   background: var(--desk-1);
   font-family: var(--face);
   font-weight: var(--weight);
 }
 :root[data-appearance="dark"] {
+  /* Original dark's desk and page, so the desk is never white before the theme is painted. */
+  --desk-0: #1a1816;
+  --desk-1: #111111;
+  --desk-2: #0b0a09;
+  --page: #1c1a17;
+  --page-2: #211e1a;
+  --ink: #e8e2d6;
   --shadow: 0, 0, 0;
   --light-1: #6e4a40;
   --light-2: #6b5f3f;
@@ -53,6 +67,15 @@
   --pop-fill: rgba(255, 255, 255, 0.09);
   --pop-fill-hover: rgba(255, 255, 255, 0.16);
   --pop-menu: rgba(46, 46, 48, 0.97);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-appearance]) {
+    --desk-0: #1a1816;
+    --desk-1: #111111;
+    --desk-2: #0b0a09;
+    --ink: #e8e2d6;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -74,6 +97,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   display: flex;
   flex-direction: column;
   padding: 0 28px 28px;
+}
+/* The spread fits the window; a leaf lifted mid-turn must not make the window scroll. */
+@media (min-width: 901px) {
+  .desk { height: 100vh; overflow: clip; }
 }
 
 .chrome {
@@ -99,9 +126,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 }
 .icon-btn, .textish {
   border: 0; background: transparent; color: var(--faint); padding: 4px;
+  transition: color 120ms var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
+.icon-btn { border-radius: 6px; line-height: 0; }
+.icon-btn:active:not(:disabled) { transform: scale(0.94); transition-duration: 60ms; }
+.icon-btn:disabled { opacity: 0.45; cursor: default; }
 .icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.4; }
-.icon-btn.active, .icon-btn:hover, .textish:hover { color: var(--terra); }
+.icon-btn.active, .icon-btn[aria-expanded="true"], .icon-btn:hover:not(:disabled), .textish:hover { color: var(--terra); }
 .running-title {
   font-size: 15px;
   letter-spacing: 0.01em;
@@ -116,6 +147,12 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   box-shadow: 0 16px 40px rgba(var(--shadow), 0.14);
   padding: 10px 0;
   min-width: 220px;
+  border-radius: 3px;
+  animation: pop var(--dur-fast) var(--ease-out) both;
+}
+/* A card grows out of the button that opened it (Chrome.tsx sets the exact origin). */
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.96); }
 }
 .menu { left: 28px; }
 .menu button, .search-card button {
@@ -124,6 +161,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   padding: 7px 16px;
   color: var(--ink);
 }
+.menu button, .search-card button { transition: color 120ms var(--ease-out); }
 .menu button:hover, .search-card button:hover { color: var(--terra); }
 .menu .on { color: var(--terra); }
 .model-list { max-height: min(320px, 50vh); overflow: auto; border-top: 1px solid var(--rule); margin-top: 4px; padding-top: 4px; }
@@ -153,7 +191,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   grid-template-columns: 1fr 1fr;
   position: relative;
   filter: drop-shadow(0 22px 40px rgba(var(--shadow), 0.16));
-  perspective: 2200px;
+  /* Seen from well above, so a lifted leaf barely grows as it nears the eye (curl.ts
+     CURL_PERSPECTIVE; BookView sets the same value on the reading spread). */
+  perspective: 20000px;
 }
 .book.single {
   width: min(540px, calc(100vw - 40px));
@@ -207,6 +247,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   overflow: hidden;
 }
 .line.gap { height: calc(var(--lh) * 0.55); }
+/* Streaming ink: a newly laid line settles in. Lines are keyed by index, so a line already laid,
+   or the last line growing, never animates again. */
+.line { animation: ink-in 120ms linear both; }
+.leaf .line, .leaf-fade .line, .page-over.leaving .line { animation: none; }
+@keyframes ink-in {
+  from { opacity: 0; }
+}
 .line.justify { text-align: justify; text-align-last: justify; }
 .line.ragged, .ragged .line.justify { text-align: left; text-align-last: auto; }
 .line.ink, .quill, .ink-line, .chip {
@@ -236,7 +283,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   border-top: 1px solid var(--rule);
   font-size: 15px; line-height: 1.35; color: var(--soft);
 }
-.footnotes li { display: flex; gap: 4px; margin: 3px 0; }
+.footnotes li { display: flex; gap: 4px; margin: 3px 0; animation: ink-in 120ms linear both; }
+.leaf .footnotes li, .leaf-fade .footnotes li { animation: none; }
 .ask, .plate-actions, .hint, .fig, .chips {
   font-size: 15px; color: var(--soft); text-align: center;
 }
@@ -295,9 +343,18 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   width: 100%; border: 0; resize: none; background: transparent;
   font-size: 28px; line-height: 1.2; min-height: 72px; outline: none;
 }
-.hint { margin: 4px 0 0; color: var(--hint); font-style: italic; font-size: 14px; }
+.hint { margin: 4px 0 0; color: var(--hint); font-style: italic; font-size: 14px; white-space: pre-wrap; }
+/* The hint's words fade in when they change; the stop link fades in each time it is shown. */
+.hint-text, .hint-button { animation: fade-in var(--dur) var(--ease-out) both; }
+.hint-text:empty { display: none; }
+.hint-button { font-style: italic; transition: color 120ms var(--ease-out); }
+.hint-button:hover { color: var(--terra-deep); }
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+/* The folio always sits at the foot, even under a bare page whose quill rides high. */
 .folio-num {
-  text-align: center; color: var(--faint); margin: 8px 0 0;
+  text-align: center; color: var(--faint); margin: auto 0 0; padding-top: 8px;
   font-variant-numeric: oldstyle-nums; font-size: 14px;
 }
 .ribbon {
@@ -307,12 +364,38 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   box-shadow: 1px 2px 3px rgba(var(--shadow), 0.2);
   z-index: 3;
 }
+/* Placed: it falls from above the book and settles, a touch past and back. */
+.ribbon.dropping { animation: ribbon-drop 300ms var(--ease-out) both; }
+@keyframes ribbon-drop {
+  0% { transform: translateY(-100%); }
+  72% { transform: translateY(3px); }
+  100% { transform: translateY(0); }
+}
+
+/* The dog-ear: a hover lifts the corner a little, a press lifts it further. */
 .corner {
-  position: absolute; right: 0; bottom: 0; width: 46px; height: 46px; z-index: 5;
-  background: linear-gradient(135deg, transparent 46%, rgba(var(--shadow), 0.1) 50%, var(--page-2) 64%);
+  position: absolute; right: 0; bottom: 0; width: 56px; height: 56px; z-index: 5;
+  background: transparent;
   cursor: pointer; border: 0; padding: 0;
 }
-.corner.back { left: 0; right: auto; background: linear-gradient(225deg, transparent 46%, rgba(var(--shadow), 0.1) 50%, var(--page-2) 64%); }
+.corner::before {
+  content: "";
+  position: absolute; right: 0; bottom: 0; width: 26px; height: 26px;
+  background: linear-gradient(135deg, transparent 49%, rgba(var(--shadow), 0.14) 50%, var(--page-2) 62%, var(--page) 100%);
+  filter: drop-shadow(-1px -1px 1.5px rgba(var(--shadow), 0.08));
+  transform-origin: 100% 100%;
+  transition: transform var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out);
+}
+.corner.back { left: 0; right: auto; }
+.corner.back::before {
+  right: auto; left: 0; transform-origin: 0 100%;
+  background: linear-gradient(225deg, transparent 49%, rgba(var(--shadow), 0.14) 50%, var(--page-2) 62%, var(--page) 100%);
+  filter: drop-shadow(1px -1px 1.5px rgba(var(--shadow), 0.08));
+}
+.corner:hover::before, .corner:focus-visible::before { transform: scale(1.3); filter: drop-shadow(-2px -2px 3px rgba(var(--shadow), 0.12)); }
+.corner.back:hover::before, .corner.back:focus-visible::before { filter: drop-shadow(2px -2px 3px rgba(var(--shadow), 0.12)); }
+.corner:active::before { transform: scale(1.55); transition-duration: 80ms; }
+.corner:focus-visible { outline: none; }
 
 .opening { text-align: center; padding-top: 18%; }
 .opening-kicker {
@@ -324,16 +407,44 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .title-page, .welcome-copy { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .welcome-copy { overflow: auto; }
 .colophon, .contents { display: flex; flex-direction: column; }
+/* A single sheet (Contents, Colophon) is set down on the desk: it rises a little as it appears. */
+.book.single > .sheet { animation: sheet-rise var(--dur) var(--ease-out) both; }
+@keyframes sheet-rise {
+  from { opacity: 0; transform: translateY(8px); }
+}
+.fallback-copy { flex: 1; display: flex; flex-direction: column; justify-content: center; text-align: center; gap: 4px; }
+.fallback-copy p { font-size: 19px; line-height: 1.45; margin: 8px 0 18px; }
 .title-page { align-items: center; justify-content: center; text-align: center; }
 .title-page .kicker, .colophon .kicker {
   font-variant-caps: all-small-caps; letter-spacing: 0.22em; color: var(--faint); font-size: 13px;
 }
 .title-page .subtitle { font-style: italic; font-size: 22px; color: var(--soft); margin: 0; }
+/* Once per launch the title is set: it fades up, then the pen draws the ornament. */
+.title-page.first .kicker, .title-page.first h1, .title-page.first .subtitle {
+  animation: title-up var(--dur-slow) var(--ease-out) both;
+}
+.title-page.first h1 { animation-delay: 60ms; }
+.title-page.first .subtitle { animation-delay: 120ms; }
+@keyframes title-up {
+  from { opacity: 0; transform: translateY(6px); }
+}
+.ornament.draw path {
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+  animation: draw 600ms var(--ease-in-out) 260ms forwards;
+}
+.ornament.draw path + path { animation-delay: 420ms; }
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
 .powered {
   margin-top: auto; color: var(--faint); font-size: 14px; font-style: italic; text-align: center;
 }
 .welcome-copy { padding-top: 8px; }
 .welcome-copy h2 { font-weight: 500; font-size: 32px; margin: 0 0 12px; }
+/* The press heading keeps one line's height while its words cross over. */
+.press-heading { display: grid; min-height: 1.25em; line-height: 1.25; }
+.press-heading > span { grid-area: 1 / 1; animation: fade-in var(--dur) var(--ease-out) both; }
+.press-body { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: fade-in var(--dur) var(--ease-out) both; }
 .welcome-copy p { font-size: 19px; line-height: 1.45; margin: 0 0 14px; }
 .welcome-actions { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .primary {
@@ -359,6 +470,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 
 .contents h2 { text-align: center; font-weight: 500; font-size: 40px; margin: 12px 0 6px; }
 .toc { list-style: none; margin: 28px 0 0; padding: 0; }
+/* The rows follow the sheet in, 18 ms apart (the first twelve; the rest come with the twelfth). */
+.toc li { animation: row-in var(--dur) var(--ease-out) both; animation-delay: calc(80ms + var(--i, 0) * 18ms); }
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+.toc button { transition: color 120ms var(--ease-out); }
+.toc button:hover .toc-title { color: var(--terra); }
 .toc button {
   width: 100%; display: grid; grid-template-columns: 2.4em 1fr auto;
   gap: 10px; align-items: baseline; border: 0; background: transparent; padding: 7px 0;
@@ -370,7 +488,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .toc .untitled { font-style: italic; color: var(--soft); }
 .toc .num { color: var(--faint); font-variant-numeric: oldstyle-nums; }
 
-.plate { text-align: center; overflow: auto; }
+/* The plate takes the page down to its folio, which stays at the foot like any page's. */
+.plate { flex: 1; min-height: 0; text-align: center; overflow: auto; }
 .plate-kicker { color: var(--terra); letter-spacing: 0.14em; font-variant-caps: all-small-caps; font-size: 13px; }
 .plate-title { font-weight: 500; font-style: italic; font-size: 22px; margin: 6px 0 14px; }
 .plate-frame {
@@ -385,46 +504,140 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .diff-line.add { background: var(--add); }
 .fig { font-style: italic; margin: 12px 0; }
 .fig.settled { color: var(--faint); }
-/* A long reply scrolls in the margin, so its actions and the note field below stay in reach. */
-.margin-notes { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-.margin-note { border-left: 1px solid var(--terra); padding: 0 0 8px 14px; }
-.ink-line { font-size: 28px; margin: 0 0 6px; }
-.margin-reply { margin: 0 0 8px; font-size: 17.5px; line-height: 1.4; }
-.margin-reply.pending { font-style: italic; color: var(--faint); }
-.chips { margin-top: auto; font-family: Caveat, cursive; font-size: 24px; color: var(--chip); }
-.close-margin { position: absolute; right: 0; top: 0; font-size: 13px; font-style: italic; }
-.colophon p { font-size: 18px; line-height: 1.5; }
-.colophon .credit { font-style: italic; color: var(--soft); }
-.banner {
-  text-align: center; color: var(--terra-deep); font-style: italic; margin: 0 0 8px; font-size: 15px;
+.plate-actions button { transition: color 120ms var(--ease-out), opacity var(--dur-fast) var(--ease-out); }
+.plate-actions button:hover:not(:disabled) { color: var(--terra-deep); }
+.plate-actions button:disabled { opacity: 0.4; cursor: default; }
+/* Reject in flight: the caption breathes like ink settling, and the plate is quieted. */
+.fig.reverting { color: var(--soft); animation: settle 1.4s var(--ease-in-out) infinite alternate; }
+.plate-sheet.is-reverting .plate-frame { opacity: 0.72; transition: opacity var(--dur) var(--ease-out); }
+@keyframes settle {
+  from { opacity: 1; }
+  to { opacity: 0.5; }
 }
 
+/* The right page and whatever lies over it: a plate, or the margin. The page stays set beneath. */
+.page-stack { position: relative; display: grid; min-width: 0; min-height: 0; }
+.page-stack > .sheet { grid-area: 1 / 1; }
+.page-over { position: absolute; inset: 0; display: grid; z-index: 1; }
+.page-over > .sheet { min-height: 0; }
+/* A plate is laid on the page, and lifted off it when folded back. */
+.plate-sheet {
+  transform-origin: 50% 50%;
+  animation: plate-lay var(--dur) var(--ease-out) both;
+  box-shadow: 0 1px 2px rgba(var(--shadow), 0.06);
+}
+@keyframes plate-lay {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+}
+.page-over.leaving { z-index: 2; pointer-events: none; }
+.page-over.leaving .plate-sheet { animation: plate-lift var(--dur-fast) var(--ease-in-out) forwards; }
+@keyframes plate-lift {
+  to { opacity: 0; transform: translateY(6px) scale(0.985); }
+}
+/* A long reply scrolls in the margin, so its actions and the note field below stay in reach. */
+.margin-notes { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+/* The margin is laid from the gutter side; each note's rule is drawn down, then its words follow. */
+.margin-sheet { animation: margin-in var(--dur) var(--ease-out) both; }
+@keyframes margin-in {
+  from { opacity: 0; transform: translateX(-12px); }
+}
+.margin-note { position: relative; padding: 0 0 8px 14px; }
+.margin-note::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px;
+  background: var(--terra);
+  transform-origin: 50% 0;
+  animation: rule-draw 200ms var(--ease-out) both;
+}
+@keyframes rule-draw {
+  from { transform: scaleY(0); }
+}
+.margin-note > * { animation: fade-in var(--dur) var(--ease-out) 120ms both; }
+.ink-line { font-size: 28px; margin: 0 0 6px; }
+.margin-reply { margin: 0 0 8px; font-size: 17.5px; line-height: 1.4; }
+.margin-reply.pending { font-style: italic; color: var(--faint); animation: listen 1.6s var(--ease-in-out) infinite alternate; }
+@keyframes listen {
+  from { opacity: 0.55; }
+  to { opacity: 0.9; }
+}
+.chips { margin-top: auto; font-family: Caveat, cursive; font-size: 24px; color: var(--chip); }
+.close-margin { position: absolute; right: 0; top: 0; padding: 0 2px; font-size: 13px; line-height: inherit; font-style: italic; }
+.colophon p { font-size: 18px; line-height: 1.5; }
+.colophon .credit { font-style: italic; color: var(--soft); }
+/* A slip tucked under the title bar: it lies over the desk, so the book never moves for it. */
+.banner {
+  position: absolute; top: 46px; left: 50%; z-index: 7;
+  max-width: min(640px, calc(100vw - 48px));
+  margin: 0; padding: 5px 16px 6px;
+  translate: -50% 0;
+  text-align: center; color: var(--terra-deep); font-style: italic; font-size: 15px;
+  background: var(--page-2);
+  border: 1px solid var(--rule); border-top: 0;
+  border-radius: 0 0 3px 3px;
+  box-shadow: 0 6px 16px rgba(var(--shadow), 0.1);
+  animation: slip-down var(--dur) var(--ease-out) both;
+}
+@keyframes slip-down {
+  from { opacity: 0; transform: translateY(-8px); }
+}
+
+/* The page curl. BookView drives the leaf, its light and its two cast shadows on one
+   timeline (curl.ts, --ease-paper, --dur-slow); here are only the pieces. */
 .leaf {
   position: absolute; top: 0; bottom: 0; width: 50%;
   transform-style: preserve-3d;
   z-index: 6;
   pointer-events: none;
 }
-.leaf.forward { right: 0; transform-origin: left center; animation: curl-forward 450ms cubic-bezier(0.22, 0.7, 0.2, 1) forwards; }
-.leaf.back { left: 0; transform-origin: right center; animation: curl-back 450ms cubic-bezier(0.22, 0.7, 0.2, 1) forwards; }
+.leaf.forward { right: 0; transform-origin: left center; }
+.leaf.back { left: 0; transform-origin: right center; }
 .leaf-face {
   position: absolute; inset: 0; backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  display: grid;
   background: var(--page);
   overflow: hidden;
 }
-.leaf-face.backface { transform: rotateY(180deg); background: linear-gradient(90deg, var(--desk-0), var(--page-2) 18%, var(--page)); }
-.leaf.forward .leaf-face.backface { box-shadow: inset 18px 0 24px rgba(var(--shadow), 0.1); }
-@keyframes curl-forward {
-  0% { transform: rotateY(0deg) rotateZ(0deg); }
-  22% { transform: rotateY(-28deg) rotateZ(-5deg) translateY(-6px); }
-  100% { transform: rotateY(-180deg) rotateZ(0deg); }
+.leaf-face > .sheet { min-height: 0; }
+.leaf.forward .leaf-face > .sheet.right, .leaf.back .backface > .sheet.right { border-radius: 0 4px 4px 0; }
+.leaf-face.backface { transform: rotateY(180deg); }
+/* The back of a real sheet is a shade deeper at the fold. */
+.leaf-face.backface::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
 }
-@keyframes curl-back {
-  0% { transform: rotateY(0deg); }
-  100% { transform: rotateY(180deg); }
+.leaf.forward .backface::after { background: linear-gradient(270deg, rgba(var(--shadow), 0.1), transparent 14%); }
+.leaf.back .backface::after { background: linear-gradient(90deg, rgba(var(--shadow), 0.1), transparent 14%); }
+/* Light across the face: darkest where it bends toward the gutter, at the upright. */
+.leaf-light { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.leaf.forward .leaf-face:not(.backface) .leaf-light,
+.leaf.back .backface .leaf-light {
+  background: linear-gradient(90deg, rgba(var(--shadow), 0.26), rgba(var(--shadow), 0.08) 55%, rgba(var(--shadow), 0.14));
 }
-.reduced .leaf { animation: fade-leaf 180ms linear forwards; }
-.reduced .leaf-face.backface { display: none; }
+.leaf.back .leaf-face:not(.backface) .leaf-light,
+.leaf.forward .backface .leaf-light {
+  background: linear-gradient(270deg, rgba(var(--shadow), 0.26), rgba(var(--shadow), 0.08) 55%, rgba(var(--shadow), 0.14));
+}
+/* The shadows the lifted leaf casts: on the page it uncovers, then on the page it will cover. */
+.curl-shade {
+  position: absolute; top: 0; bottom: 0; width: 50%;
+  overflow: hidden; pointer-events: none; z-index: 5;
+}
+.curl-shade.on-right { right: 0; }
+.curl-shade.on-left { left: 0; }
+.curl-shade > span { position: absolute; inset: 0; opacity: 0; }
+.curl-shade.on-right > span {
+  background: linear-gradient(90deg, rgba(var(--shadow), 0.24), rgba(var(--shadow), 0.1) 16%, rgba(var(--shadow), 0.03) 40%, transparent 60%);
+}
+.curl-shade.on-left > span {
+  background: linear-gradient(270deg, rgba(var(--shadow), 0.24), rgba(var(--shadow), 0.1) 16%, rgba(var(--shadow), 0.03) 40%, transparent 60%);
+}
+/* Reduced motion: the destination is set beneath and the spread above fades. */
+.leaf-fade {
+  position: absolute; inset: 0; z-index: 6;
+  display: grid; grid-template-columns: 1fr 1fr;
+  pointer-events: none;
+  animation: fade-leaf 180ms linear forwards !important;
+  animation-duration: 180ms !important;
+}
 @keyframes fade-leaf { to { opacity: 0; } }
 
 @media (max-width: 900px) {
@@ -433,9 +646,30 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   .sheet { min-height: 78vh; border-radius: 3px; }
   .gutter, .lights { display: none; }
   .sheet.right { margin-top: 16px; }
+  .page-stack { margin-top: 16px; }
+  .page-stack .sheet.right { margin-top: 0; }
+}
+/* Reduced motion: nothing travels. Every animation and transition is done at once; the
+   page turn alone keeps a short fade (.leaf-fade above). */
+.reduced *, .reduced *::before, .reduced *::after {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 1ms !important;
+  transition-delay: 0ms !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .leaf { animation-duration: 180ms; }
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+.reduced .leaf-fade, .reduced .leaf-fade::before { animation-duration: 180ms !important; }
+@media (prefers-reduced-motion: reduce) {
+  .leaf-fade { animation-duration: 180ms !important; }
 }
 
 /* Themes & Settings popover */
@@ -458,6 +692,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   text-align: left;
   user-select: none;
   outline: none;
+  /* Opens out of the AA button, at the caret. */
+  transform-origin: calc(100% - 93px) -8px;
+  animation: pop var(--dur-fast) var(--ease-out) both;
 }
 .settings-caret {
   position: absolute; top: -7px; right: 86px;
@@ -471,7 +708,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .settings-clip { position: relative; overflow: hidden; overflow: clip; border-radius: 18px; }
 .settings-track {
   display: flex; width: 200%;
-  transition: transform 200ms ease;
+  transition: transform var(--dur) var(--ease-in-out);
 }
 .settings-track.customize { transform: translateX(-50%); }
 .reduced .settings-track { transition: none; }
@@ -518,6 +755,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .round-btn:hover, .round-btn[aria-expanded="true"] { background: var(--pop-fill-hover); }
 .appearance-menu {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 2;
+  transform-origin: calc(100% - 18px) -6px;
+  animation: pop var(--dur-fast) var(--ease-out) both;
   width: 168px; padding: 5px;
   border-radius: 12px;
   background: var(--pop-menu);
@@ -559,13 +798,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .switch {
   width: 40px; height: 24px; flex: none; border: 0; border-radius: 12px; padding: 2px;
   background: var(--pop-fill-hover); display: flex;
-  transition: background 150ms ease;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .switch[aria-checked="true"] { background: #34c759; }
 .switch .knob {
   width: 20px; height: 20px; border-radius: 50%; background: #ffffff;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  transition: transform 150ms ease;
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 .switch[aria-checked="true"] .knob { transform: translateX(16px); }
 @media (prefers-reduced-motion: reduce) {

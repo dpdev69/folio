@@ -3,7 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Folio</title>
+    <script>
+      // Before first paint: the saved theme and appearance on <html>, and the desk and page in its colours,
+      // so a dark reader never sees a light desk. useSettings takes over on mount. Never throws.
+      (function () {
+        var palettes = /*palettes*/{"original":{"light":{"desk-0":"#ebe4d8","desk-1":"#e3dbcf","desk-2":"#d8cfc2","page":"#f4efe6","page-2":"#f7f3ea","ink":"#2c261f"},"dark":{"desk-0":"#1a1816","desk-1":"#111111","desk-2":"#0b0a09","page":"#1c1a17","page-2":"#211e1a","ink":"#e8e2d6"}},"quiet":{"light":{"desk-0":"#dcdbd8","desk-1":"#d3d2cf","desk-2":"#c8c7c4","page":"#e9e8e5","page-2":"#edecea","ink":"#45433f"},"dark":{"desk-0":"#1b1b1c","desk-1":"#141415","desk-2":"#0e0e0f","page":"#252527","page-2":"#29292b","ink":"#bdbbb6"}},"paper":{"light":{"desk-0":"#efebe3","desk-1":"#e7e2d8","desk-2":"#dcd6cb","page":"#fbf9f4","page-2":"#fdfcf8","ink":"#1a1714"},"dark":{"desk-0":"#171513","desk-1":"#100f0e","desk-2":"#0a0909","page":"#201e1b","page-2":"#24221e","ink":"#ebe6dc"}},"bold":{"light":{"desk-0":"#ebe8e3","desk-1":"#e2ded8","desk-2":"#d6d1ca","page":"#fdfcfa","page-2":"#ffffff","ink":"#000000"},"dark":{"desk-0":"#0c0b0b","desk-1":"#060606","desk-2":"#000000","page":"#121110","page-2":"#161514","ink":"#ffffff"}},"calm":{"light":{"desk-0":"#e2d6bd","desk-1":"#d9ccb1","desk-2":"#ccbea2","page":"#efe6d2","page-2":"#f2eadb","ink":"#4a3a2a"},"dark":{"desk-0":"#2c2620","desk-1":"#241f1a","desk-2":"#1b1713","page":"#3a332b","page-2":"#3e372e","ink":"#e6d7bf"}},"focus":{"light":{"desk-0":"#ece6d8","desk-1":"#e4ddcd","desk-2":"#d8d0be","page":"#fbf7ec","page-2":"#fdfaf2","ink":"#26231e"},"dark":{"desk-0":"#1e1b17","desk-1":"#171411","desk-2":"#100e0c","page":"#2a2621","page-2":"#2e2a24","ink":"#ece4d4"}}}/*end*/;
+        try {
+          var root = document.documentElement;
+          var saved = {};
+          try {
+            saved = JSON.parse(window.localStorage.getItem("folio.settings") || "{}") || {};
+          } catch (e) {}
+          var theme = palettes[saved.theme] ? saved.theme : "original";
+          var appearance = saved.appearance === "light" || saved.appearance === "dark" ? saved.appearance : "auto";
+          if (appearance === "auto") {
+            appearance = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          root.setAttribute("data-theme", theme);
+          root.setAttribute("data-appearance", appearance);
+          root.style.colorScheme = appearance;
+          var colours = palettes[theme][appearance];
+          for (var key in colours) root.style.setProperty("--" + key, colours[key]);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

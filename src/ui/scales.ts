@@ -35,18 +35,52 @@ const MARGINS: Record<Margins, { marginX: number; width: number }> = {
   wide: { marginX: 64, width: -32 },
 };
 
+/** The book's full height, and how styles.css sizes it: `min(700px, 100vh - 110px)`. */
+export const BOOK_HEIGHT = 700;
+const DESK_OVERHEAD = 110;
+/** Below this width the spread stacks into one column of sheets that grow to fit their lines. */
+const STACKED_WIDTH = 900;
+/** Fewest prose lines a page is given, however short the window. */
+const MIN_LINES = 6;
+
+export type Viewport = { width: number; height: number };
+
+/** The height of the book on the desk, or null when the sheets stack and grow to fit. */
+export function bookHeight(viewport: Viewport): number | null {
+  if (viewport.width <= STACKED_WIDTH) return null;
+  return Math.min(BOOK_HEIGHT, viewport.height - DESK_OVERHEAD);
+}
+
+function currentViewport(): Viewport | undefined {
+  if (typeof window === "undefined" || !window.innerHeight) return undefined;
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
+/**
+ * The scale as laid: line spacing and the theme's leading fit inside the same
+ * page height, margins trade with the measure, and a book shorter than its full
+ * height gives up whole prose lines for every pixel it lacks (the running head,
+ * folio and quill keep their size). `viewport` defaults to the window's.
+ */
 export function layoutScale(
   base: Scale,
-  opts: { lineSpacing: LineSpacing; margins: Margins },
+  opts: { lineSpacing: LineSpacing; margins: Margins; viewport?: Viewport },
   theme: Theme,
 ): LaidScale {
   const lineHeight = Math.round(base.lineHeight * SPACING[opts.lineSpacing] * theme.leading);
   const budget = base.lines * base.lineHeight;
   const margin = MARGINS[opts.margins];
+  let lines = lineHeight === base.lineHeight ? base.lines : Math.max(MIN_LINES, Math.floor(budget / lineHeight));
+  const viewport = opts.viewport ?? currentViewport();
+  const height = viewport ? bookHeight(viewport) : null;
+  if (height != null && height < BOOK_HEIGHT) {
+    const fit = Math.floor((budget - (BOOK_HEIGHT - height)) / lineHeight);
+    lines = Math.min(lines, Math.max(MIN_LINES, fit));
+  }
   return {
     ...base,
     lineHeight,
-    lines: lineHeight === base.lineHeight ? base.lines : Math.max(6, Math.floor(budget / lineHeight)),
+    lines,
     width: base.width + margin.width,
     marginX: margin.marginX,
   };
@@ -54,6 +88,12 @@ export function layoutScale(
 
 /** The footnotes' and slips' type size, as styles.css sets it. */
 export const FOOT_SIZE = 15;
+/** A footnote line: 15 px type at line-height 1.35. */
+const FOOT_LINE = FOOT_SIZE * 1.35;
+/** Each footnote's `li` margin (3 px, collapsing between notes). */
+const FOOT_NOTE_GAP = 3;
+/** The footnotes' rule above them: `.footnotes` margin-top 8, padding-top 8, border 1. */
+export const FOOT_OVERHEAD = 17;
 
 /**
  * Characters of footnote type in one line of the foot. The foot is at least as
@@ -64,12 +104,23 @@ export function footChars(scale: Scale, averageChar = FOOT_SIZE * 0.46): number 
 }
 
 /**
- * Prose lines the page foot takes: each footnote its own lines (number and
- * text, `chars` to a line), and one line for each slip or ask.
+ * Prose lines the page foot takes: the footnotes' rule and spacing, each
+ * footnote its own lines (number and text, `chars` to a line), all in pixels
+ * and rounded up to whole prose lines of `lineHeight`; then one line for each
+ * slip or ask.
  */
-export function footReserve(chars: number): (notes: { n: number; text: string }[], extra: number) => number {
-  return (notes, extra) =>
-    notes.reduce((sum, note) => sum + Math.max(1, Math.ceil((`${note.n}  ${note.text}`.length) / chars)), 0) + extra;
+export function footReserve(
+  chars: number,
+  lineHeight = SCALES[DEFAULT_SCALE_INDEX].lineHeight,
+): (notes: { n: number; text: string }[], extra: number) => number {
+  return (notes, extra) => {
+    if (notes.length === 0) return extra;
+    const px = notes.reduce(
+      (sum, note) => sum + Math.max(1, Math.ceil(`${note.n}  ${note.text}`.length / chars)) * FOOT_LINE + FOOT_NOTE_GAP,
+      FOOT_OVERHEAD + FOOT_NOTE_GAP,
+    );
+    return Math.ceil(px / Math.max(1, lineHeight)) + extra;
+  };
 }
 
 export function footFont(theme?: Theme): string {

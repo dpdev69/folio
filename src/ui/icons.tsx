@@ -51,11 +51,12 @@ export function IconRibbon({ className }: IconProps) {
   );
 }
 
-export function Ornament() {
+/** The fleuron between parts of a page. `draw` lets the pen trace it once, on the title page. */
+export function Ornament({ draw = false }: { draw?: boolean }) {
   return (
-    <svg className="ornament" viewBox="0 0 64 16" aria-hidden="true">
-      <path d="M32 8c-2-4-6-4-8 0 2 4 6 4 8 0Zm0 0c2-4 6-4 8 0-2 4-6 4-8 0Z" />
-      <path d="M8 8h14M42 8h14" />
+    <svg className={`ornament ${draw ? "draw" : ""}`} viewBox="0 0 64 16" aria-hidden="true">
+      <path pathLength={1} d="M32 8c-2-4-6-4-8 0 2 4 6 4 8 0Zm0 0c2-4 6-4 8 0-2 4-6 4-8 0Z" />
+      <path pathLength={1} d="M8 8h14M42 8h14" />
     </svg>
   );
 }

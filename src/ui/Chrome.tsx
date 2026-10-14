@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { displayTitle, toRoman } from "../book/model";
 import { IconBook, IconContents, IconMenu, IconRibbon, IconSearch, IconType } from "./icons";
 import { SettingsPopover } from "./Settings";
@@ -14,12 +14,17 @@ export function Chrome({ folio }: { folio: Folio }) {
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const searchButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     setTauri("__TAURI_INTERNALS__" in window);
   }, []);
 
   // The menu closes like the settings card: Escape, or a press anywhere outside it.
   const { menuOpen, setMenuOpen } = folio;
+  // A card grows out of the button that opened it.
+  useOriginAt(menuRef, menuButton, menuOpen);
+  useOriginAt(searchRef, searchButton, folio.searchOpen);
   useEffect(() => {
     if (!menuOpen) return;
     const onPointer = (event: PointerEvent) => {
@@ -118,7 +123,14 @@ export function Chrome({ folio }: { folio: Folio }) {
             />
           ) : null}
         </span>
-        <button type="button" className="icon-btn" aria-label="Search" onClick={() => folio.setSearchOpen(!folio.searchOpen)}>
+        <button
+          ref={searchButton}
+          type="button"
+          className="icon-btn"
+          aria-label="Search"
+          aria-expanded={folio.searchOpen}
+          onClick={() => folio.setSearchOpen(!folio.searchOpen)}
+        >
           <IconSearch />
         </button>
         <button
@@ -189,7 +201,7 @@ export function Chrome({ folio }: { folio: Folio }) {
         </div>
       ) : null}
       {folio.searchOpen && folio.book ? (
-        <div className="search-card">
+        <div className="search-card" ref={searchRef}>
           <input
             aria-label="Search the book"
             placeholder="Search the book"
@@ -206,6 +218,18 @@ export function Chrome({ folio }: { folio: Folio }) {
       ) : null}
     </header>
   );
+}
+
+/** Sets a popover's transform-origin under the centre of its button, so it opens from there. */
+function useOriginAt(card: RefObject<HTMLElement | null>, button: RefObject<HTMLElement | null>, open: boolean) {
+  useLayoutEffect(() => {
+    const el = card.current;
+    const from = button.current;
+    if (!open || !el || !from) return;
+    const a = el.getBoundingClientRect();
+    const b = from.getBoundingClientRect();
+    el.style.transformOrigin = `${Math.round(b.left + b.width / 2 - a.left)}px ${Math.round(b.bottom - a.top)}px`;
+  }, [card, button, open]);
 }
 
 async function closeWindow() {

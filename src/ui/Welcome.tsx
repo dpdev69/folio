@@ -1,6 +1,28 @@
 import type { PressPhase } from "../welcome/copy";
 import { INSTALL_COMMAND } from "../welcome/copy";
+import { useEffect, useState } from "react";
 import { Ornament } from "./icons";
+
+/** The title is set with a flourish once per launch; coming back to it later, it is simply there. */
+let titleSeen = false;
+
+/** The heading of the press page, one per phase, so the words can change in place. */
+function pressHeading(press: PressPhase): string {
+  switch (press.phase) {
+    case "checking":
+      return "Looking for the press…";
+    case "installing":
+      return "Installing opencode…";
+    case "missing":
+      return "Opencode is not here yet.";
+    case "needs-password":
+      return "The press wants its password.";
+    case "ready":
+      return "The press is ready.";
+    case "error":
+      return "The press did not answer.";
+  }
+}
 
 export function Welcome({
   press,
@@ -52,6 +74,12 @@ export function Welcome({
   onSample: () => void;
   onUseKey: () => void;
 }) {
+  const [first] = useState(() => !titleSeen);
+  useEffect(() => {
+    titleSeen = true;
+  }, []);
+  const heading = pressHeading(press);
+
   const attach = (open: boolean) => (
     <details className="attach" open={open}>
       <summary>Attach to a running press</summary>
@@ -88,24 +116,29 @@ export function Welcome({
 
   return (
     <div className="book" role="main">
+      <span className="gutter" />
       <article className="sheet left">
-        <div className="title-page">
+        <div className={`title-page ${first ? "first" : ""}`}>
           <p className="kicker">A reading room</p>
           <h1>Folio</h1>
           <p className="subtitle">for a repository</p>
-          <Ornament />
+          <Ornament draw={first} />
           <p className="powered">Powered by opencode{modelLabel ? ` · set in ${modelLabel}` : ""}</p>
         </div>
       </article>
       <article className="sheet right">
         <header className="running">The press</header>
         <div className="welcome-copy">
+          {/* The heading keeps its height while its words change, so nothing below it jumps. */}
+          <h2 className="press-heading" aria-live="polite">
+            <span key={heading}>{heading}</span>
+          </h2>
+          <div className="press-body" key={press.phase}>
           {press.phase === "checking" || press.phase === "installing" ? (
-            <p>{press.phase === "installing" ? "Installing opencode…" : "Looking for the press on this machine."}</p>
+            <p>{press.phase === "installing" ? "Fetching the press and setting it beside Folio." : "Folio looks for opencode on this machine."}</p>
           ) : null}
           {press.phase === "missing" ? (
             <>
-              <h2>Opencode is not here yet.</h2>
               <p>Folio does not bring its own model. It reads through opencode, which is not installed.</p>
               <div className="welcome-actions">
                 <button type="button" className="primary" onClick={onInstall}>
@@ -122,7 +155,6 @@ export function Welcome({
           ) : null}
           {press.phase === "needs-password" ? (
             <>
-              <h2>The press wants its password.</h2>
               <p>This press was started elsewhere and keeps a password. Give its address and password to attach.</p>
               {press.detail ? <p className="detail">{press.detail}</p> : null}
               {attach(true)}
@@ -135,7 +167,6 @@ export function Welcome({
           ) : null}
           {press.phase === "ready" ? (
             <>
-              <h2>The press is ready.</h2>
               <p>
                 {press.summary ? <>Using {press.summary}. </> : null}
                 Open a folder and the first chapter will be waiting, with the quill on the page.
@@ -213,7 +244,6 @@ export function Welcome({
           ) : null}
           {press.phase === "error" ? (
             <>
-              <h2>The press did not answer.</h2>
               <p className="detail">{press.message}</p>
               <div className="welcome-actions">
                 <button type="button" className="primary" onClick={onRetry}>
@@ -226,6 +256,7 @@ export function Welcome({
               {attach(false)}
             </>
           ) : null}
+          </div>
         </div>
       </article>
     </div>

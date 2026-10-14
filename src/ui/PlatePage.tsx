@@ -32,8 +32,10 @@ export function PlatePage({
   folded?: boolean;
 }) {
   const roman = plateRoman(plate.n);
+  // Reject is on its way to the file: the plate takes no other answer until it lands.
+  const reverting = plate.status === "reverting";
   return (
-    <article className="sheet right plate-sheet">
+    <article className={`sheet right plate-sheet ${reverting ? "is-reverting" : ""}`} aria-busy={reverting || undefined}>
       <header className="running">
         Plate {roman} · {plate.file} · +{plate.additions} −{plate.deletions}
       </header>
@@ -84,18 +86,20 @@ export function PlatePage({
               </>
             ) : (
               <>
-                <p className="fig">{plate.caption}</p>
-                {plate.status === "open" ? (
+                <p className={`fig ${reverting ? "reverting" : ""}`} aria-live="polite">
+                  {reverting ? "Restoring the file…" : plate.caption}
+                </p>
+                {plate.status === "open" || reverting ? (
                   <p className="plate-actions">
-                    <button type="button" onClick={onAccept}>
+                    <button type="button" disabled={reverting} onClick={onAccept}>
                       Accept
                     </button>
                     <span>·</span>
-                    <button type="button" onClick={onRevise}>
+                    <button type="button" disabled={reverting} onClick={onRevise}>
                       Revise
                     </button>
                     <span>·</span>
-                    <button type="button" onClick={onReject}>
+                    <button type="button" disabled={reverting} onClick={onReject}>
                       Reject
                     </button>
                     <span>·</span>

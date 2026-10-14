@@ -18,6 +18,7 @@ export function PageFace({
   number,
   side,
   quill,
+  covered = false,
   draft,
   onDraft,
   onSubmit,
@@ -40,6 +41,8 @@ export function PageFace({
   number: number;
   side: "left" | "right";
   quill: boolean;
+  /** Something lies over this page (a plate, the margin): it stays set but takes no input. */
+  covered?: boolean;
   draft: string;
   onDraft: (value: string) => void;
   onSubmit: (text: string) => void;
@@ -65,9 +68,18 @@ export function PageFace({
   const heading = side === "left" ? `Chapter ${roman}  ·  ${displayTitle(chapter ?? fallbackChapter(page.chapterId))}` : bookTitle;
   // A question from the press, or a passing remark such as a retry, takes the hint's place.
   const waiting = chapter?.forms.length ? "the press is waiting for your answer" : chapter?.notice;
+  const hint = busy
+    ? waiting
+      ? `${waiting}  ·  `
+      : ""
+    : waiting
+      ? waiting
+      : askBeforeWrite
+        ? "the press will ask before it writes  ·  return twice to send"
+        : "return twice to send  ·  or turn the page";
 
   return (
-    <article className={`sheet ${side}`} data-side={side}>
+    <article className={`sheet ${side}`} data-side={side} inert={covered} aria-hidden={covered || undefined}>
       <header className="running">{heading}</header>
       <div
         className="prose"
@@ -151,21 +163,14 @@ export function PageFace({
                 else onDraft(next.value);
               }}
             />
+            {/* One hint, its words fading in as they change; the stop link is one element for the whole turn. */}
             <p className="hint">
-              {busy ? (
-                <>
-                  {waiting ? `${waiting}  ·  ` : null}
-                  <button type="button" className="hint-button" onClick={onStop}>
-                    stop
-                  </button>
-                </>
-              ) : waiting ? (
-                waiting
-              ) : askBeforeWrite ? (
-                "the press will ask before it writes  ·  return twice to send"
-              ) : (
-                "return twice to send  ·  or turn the page"
-              )}
+              <span key={hint} className="hint-text">
+                {hint}
+              </span>
+              <button type="button" className="hint-button" hidden={!busy} onClick={onStop}>
+                stop
+              </button>
             </p>
           </div>
         )}

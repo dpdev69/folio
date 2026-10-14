@@ -2,6 +2,7 @@ import { BookView } from "./BookView";
 import { Chrome } from "./Chrome";
 import { Colophon } from "./Colophon";
 import { Contents } from "./Contents";
+import { PageBoundary } from "./PageBoundary";
 import { Welcome } from "./Welcome";
 import { useFolio } from "../state/useFolio";
 
@@ -19,7 +20,7 @@ export function App() {
     <div className={`desk ${folio.reduced ? "reduced" : ""} ${folio.settings.justify ? "" : "ragged"}`} style={style}>
       <Chrome folio={folio} />
       {folio.notice ? (
-        <p className="banner">
+        <p className="banner" role="status">
           {folio.noticeAction === "choose-model" ? (
             <button type="button" className="linkish banner-action" onClick={folio.openModels}>
               {folio.notice}
@@ -33,6 +34,7 @@ export function App() {
         </p>
       ) : null}
       <main className="stage">
+        <PageBoundary key={folio.nav.view}>
         {folio.nav.view === "colophon" ? (
           <Colophon
             onClose={() => folio.closeColophon()}
@@ -74,6 +76,7 @@ export function App() {
             onCloseKeys={folio.hideProviderForm}
           />
         )}
+        </PageBoundary>
       </main>
     </div>
   );

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { PALETTE_KEYS, THEMES, themeById, themeVars, type Palette } from "./themes";
 
+/** A file's text beside this one. Vitest empties CSS imports, so the file is read from disk. */
+async function read(path: string): Promise<string> {
+  const fs = "node:fs";
+  const { readFileSync } = (await import(/* @vite-ignore */ fs)) as { readFileSync: (url: URL, encoding: string) => string };
+  return readFileSync(new URL(path, import.meta.url), "utf8");
+}
+
 function luminance(hex: string): number {
   const m = /^#([0-9a-f]{6})$/i.exec(hex);
   if (!m) throw new Error(`not a #rrggbb colour: ${hex}`);
@@ -57,6 +64,47 @@ describe("theme table", () => {
         }
         expect(contrast(p.ink, p.highlight), `${theme.id} ${appearance} ink on highlight`).toBeGreaterThanOrEqual(4.5);
         expect(contrast(p.ink, p.add), `${theme.id} ${appearance} ink on add`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("sets ink, soft, the running title and terra at 4.5:1 or better on the page", () => {
+    for (const theme of THEMES) {
+      for (const appearance of ["light", "dark"] as const) {
+        const p = theme[appearance];
+        for (const key of ["ink", "soft", "title", "terra"] as const) {
+          expect(contrast(p[key], p.page), `${theme.id} ${appearance} ${key} on page`).toBeGreaterThanOrEqual(4.5);
+        }
+        // The running title sits in the title bar, over the desk.
+        for (const desk of ["desk-0", "desk-1"] as const) {
+          expect(contrast(p.title, p[desk]), `${theme.id} ${appearance} title on ${desk}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+
+  it("keeps the pre-mount :root in styles.css equal to Original light", async () => {
+    const css = await read("../styles.css");
+    const block = /^:root \{([\s\S]*?)^\}/m.exec(css)?.[1] ?? "";
+    for (const key of PALETTE_KEYS) {
+      const value = new RegExp(`--${key}:\\s*([^;]+);`).exec(block)?.[1].trim();
+      expect(value, `:root --${key}`).toBe(THEMES[0].light[key]);
+    }
+  });
+
+  it("paints the saved theme's desk and page before mount, from the same palettes", async () => {
+    const html = await read("../../index.html");
+    const json = /\/\*palettes\*\/(\{[\s\S]*?\})\/\*end\*\//.exec(html)?.[1];
+    expect(json, "index.html carries the palettes").toBeTruthy();
+    const palettes = JSON.parse(json!) as Record<string, Record<"light" | "dark", Record<string, string>>>;
+    expect(Object.keys(palettes)).toEqual(THEMES.map((theme) => theme.id));
+    for (const theme of THEMES) {
+      for (const appearance of ["light", "dark"] as const) {
+        const painted = palettes[theme.id][appearance];
+        expect(Object.keys(painted).length).toBeGreaterThan(0);
+        for (const [key, value] of Object.entries(painted)) {
+          expect(value, `${theme.id} ${appearance} ${key}`).toBe(theme[appearance][key as keyof Palette]);
+        }
       }
     }
   });

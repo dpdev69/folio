@@ -23,7 +23,7 @@ export function Contents({
             const page = (chapterStart[chapter.id] ?? 0) + 1;
             const here = chapter.id === currentId;
             return (
-              <li key={chapter.id}>
+              <li key={chapter.id} style={{ ["--i" as string]: Math.min(index, 12) }}>
                 <button type="button" onClick={() => onJump(Math.floor((chapterStart[chapter.id] ?? 0) / 2))}>
                   <span>{toRoman(index + 1)}</span>
                   <span className={`toc-title ${here ? "here" : chapter.untitled ? "untitled" : ""}`}>
