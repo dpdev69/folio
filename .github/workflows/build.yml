@@ -88,6 +88,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/**
           if-no-files-found: error
+          retention-days: 3
 
   # Run on demand (Actions, "Run workflow", tick intel): cross-builds the Intel app and dmg
   # on the Apple-silicon runner. Unsigned, so it carries no secrets.
@@ -116,3 +117,4 @@ jobs:
           path: |
             src-tauri/target/x86_64-apple-darwin/release/bundle/**
           if-no-files-found: error
+          retention-days: 3
