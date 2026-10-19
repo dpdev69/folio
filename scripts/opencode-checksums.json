@@ -6,5 +6,13 @@
     "opencode-linux-x64.tar.gz": "15cc878cfc7462fe477238538df27ae3fbd03c1ea7631615cacf0977f5b629c6",
     "opencode-windows-arm64.zip": "4ee22d846d918da4fb134054f70dc030f0c8146c2fe1c96361822e5cfb632791",
     "opencode-windows-x64.zip": "e98cbf73894ab7d13e8772aa021456b34468328302101e218a26fdaf1b402081"
+  },
+  "2.0.32": {
+    "opencode-darwin-arm64.zip": "e431e369025ba9554445d0ea8ad65457fbca59aa385ca790724ec6ab488d271b",
+    "opencode-darwin-x64.zip": "1b2d6d58741db617d02ab2cd589de8bc5c829d8b0093226e813a10d044f4ede9",
+    "opencode-linux-arm64.tar.gz": "c2e4f6c94f2e58a2df99cc647bd37285569600d7435e3796152825d8c9d10382",
+    "opencode-linux-x64.tar.gz": "ba3f5d9dd983f12f06981b5b9eb966c03db63266afab28adc4000bbad6adc33c",
+    "opencode-windows-arm64.zip": "0f0e1f73ed72565a33414a581248fcdc7ef49e5d04d32cb66c02336baa472b0a",
+    "opencode-windows-x64.zip": "51ce4d910795ce1365131c3185abda99157f0776acaa643bdf631a804c1495ce"
   }
 }

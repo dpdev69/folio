@@ -6,11 +6,11 @@ The shell is Tauri 2. The pages are React, TypeScript, and Vite. opencode is not
 
 ## What the first launch does
 
-Folio brings its own press. The installer carries opencode 2.0.28 as a sidecar next to the Folio executable, so there is nothing to install first.
+Folio brings its own press. The installer carries opencode 2.0.32 as a sidecar next to the Folio executable, so there is nothing to install first.
 
 - Folio starts the sidecar with `serve --stdio` on a random local port and a password made for that launch. The window talks to it directly over HTTP. Folio holds the child's standard input open, so the press stops when Folio does.
 - The press keeps its sessions, keys, and cache under Folio's own app data folder (a `press` folder inside it; on macOS, `~/Library/Application Support/app.folio.desktop/press`). It never opens your own opencode database. Your opencode config folder stays yours. The press runs in `press/cwd` inside that folder (an app opened from Finder would otherwise run it in `/`), so the title page's model and provider questions are about no particular project; once a book is open, every location-scoped call names the book's folder.
-- The free OpenCode Zen provider counts as connected, so no key is needed to begin. The title page says which press and model it will use, for example `opencode 2.0.28 · OpenCode Zen, cat-jam-free`.
+- The free OpenCode Zen provider counts as connected, so no key is needed to begin. The title page says which press and model it will use, for example `opencode 2.0.32 · OpenCode Zen, ll-alpha-free`.
 - A key is optional. **A provider key…** in the menu (and **Use a provider key** on the title page) lists the providers that take a pasted key and stores it in the press with `POST /api/integration/{id}/connect/key`. Opencode keeps it on this machine; Folio does not keep a copy.
 - **Attach to a running press** takes an address and a password, for a server you started yourself. The title page offers it when the press is missing, wants a password, or did not answer.
 - **Open a folder** binds that repository as the book. The first empty chapter opens with a short note and the quill, so you can write immediately. Press Return twice to send.
@@ -48,7 +48,7 @@ Run `npm run fetch-press` once first (see Bundled press), because the Tauri buil
 
 ### The replay press
 
-`scripts/replay-press.mjs` is a small stand-in for `opencode serve` 2.0.28 that needs no model and no dependencies. It answers the routes Folio calls and replays recorded event streams from `src/book/__fixtures__/`.
+`scripts/replay-press.mjs` is a small stand-in for `opencode serve` (recorded from 2.0.28; the routes Folio calls are unchanged in 2.0.32) that needs no model and no dependencies. It answers the routes Folio calls and replays recorded event streams from `src/book/__fixtures__/`.
 
 ```bash
 node scripts/replay-press.mjs --port 4096 --password replay
@@ -74,7 +74,7 @@ npm run fetch-press -- --dest /some/folder
 - `--dest <dir>` writes the sidecar into `<dir>` instead of `src-tauri/binaries`. The file name is the same.
 - `--binary <path>` copies a binary you already have. On macOS the script also reuses `/Applications/OpenCode.app` when it reports the pinned version, which saves the download (the archive is about 85 MB; the unpacked binary is about 186 MB). Pass `--download` to skip that and fetch from the network.
 - Otherwise it downloads the release archive from `opencode.ai/files/bin/<version>/`, then from the GitHub release if that fails, verifies it, unpacks it, and checks `--version`. A target that cannot run on this machine is downloaded without the version check.
-- Verification: `scripts/opencode-checksums.json` pins SHA-256 digests by version and then by archive name. A mismatch stops the script and nothing is installed. An absent pin only prints a warning along with the digest it computed, so the file can be extended. Upstream publishes no checksum file for the release, so each pin was computed from the archive itself, downloaded once from `opencode.ai`; all six 2.0.28 archives are pinned. Pin every new version the same way before it ships.
+- Verification: `scripts/opencode-checksums.json` pins SHA-256 digests by version and then by archive name. A mismatch stops the script and nothing is installed. An absent pin only prints a warning along with the digest it computed, so the file can be extended. Upstream publishes no checksum file for the release, so each pin was computed from the archive itself, downloaded once from `opencode.ai`; the six 2.0.28 archives and the six 2.0.32 archives are pinned. Pin every new version the same way before it ships.
 
 ## Book
 
