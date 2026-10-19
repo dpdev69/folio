@@ -750,10 +750,9 @@ mod tests {
     /// Every resolved address is tried, not only the first.
     #[test]
     fn tries_every_address() {
-        let closed = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            listener.local_addr().unwrap()
-        };
+        // Port 0 never answers. A port freed by a dropped listener could be taken by a test
+        // running alongside, which once made the "closed" address answer first.
+        let closed = std::net::SocketAddr::from(([127, 0, 0, 1], 0));
         let open = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let good = open.local_addr().unwrap();
         let stream = connect_any([closed, good], Duration::from_secs(1)).expect("the second address answers");

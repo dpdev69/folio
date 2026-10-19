@@ -561,6 +561,7 @@ export function useFolio() {
     }
   }
 
+  /** `id` may be the plate's id or, for a diff plate renamed since it was read, the id it had before. */
   function mutatePlate(id: string, edit: (plate: Plate) => Plate) {
     editBook((current) => {
       if (!current) return current;
@@ -568,7 +569,7 @@ export function useFolio() {
         ...current,
         chapters: current.chapters.map((chapter) => ({
           ...chapter,
-          plates: chapter.plates.map((plate) => (plate.id === id ? edit(plate) : plate)),
+          plates: chapter.plates.map((plate) => (plate.id === id || plate.formerId === id ? edit(plate) : plate)),
         })),
       };
     });

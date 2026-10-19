@@ -48,6 +48,8 @@ export type Plate = {
   /** "reverting": Reject is in flight; the plate takes no other answer until it lands. */
   status: "open" | "accepted" | "reverted" | "reverting";
   folded: boolean;
+  /** The id a diff plate had before its turn was renamed (`diff-<file>@local-…`), so a Reject in flight still finds it. */
+  formerId?: string;
 };
 
 export type MarginNote = {
