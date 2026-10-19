@@ -148,13 +148,15 @@ export class EngineClient {
   }
 
   async createSession(input: {
-    title: string;
+    /** Left out, the press names the session from its first turn. */
+    title?: string;
     directory: string;
     agent?: string;
     model?: ModelRef;
     permissions?: PermissionRule[];
   }): Promise<SessionInfo> {
-    const body: Record<string, unknown> = { title: input.title, location: { directory: input.directory } };
+    const body: Record<string, unknown> = { location: { directory: input.directory } };
+    if (input.title) body.title = input.title;
     if (input.agent) body.agent = input.agent;
     if (input.model) body.model = { providerID: input.model.providerID, id: input.model.id };
     if (input.permissions) body.permissions = input.permissions;

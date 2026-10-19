@@ -342,6 +342,21 @@ describe("the wrap cache while a paragraph grows", () => {
   });
 });
 
+describe("when a paragraph takes no drop cap", () => {
+  const drop = { lines: 3, width: 4 };
+  it("sets a paragraph shorter than the drop cap without one", () => {
+    const lines = wrapParagraph({ text: "One short line.", measure, width: 60, drop });
+    expect(lines.map((l) => [l.drop, l.besideDrop, l.text])).toEqual([[undefined, false, "One short line."]]);
+  });
+  it("sets none before an apostrophe or on a mark that is not a letter", () => {
+    const long = " look at the existing code first, then the conventions, then write the change and say why it fits the rest of the file.";
+    for (const text of [`I'll${long}`, `I’ve${long}`, `"Quoted${long}`]) {
+      expect(wrapParagraph({ text, measure, width: 60, drop }).some((l) => l.drop || l.besideDrop)).toBe(false);
+    }
+    expect(wrapParagraph({ text: `It${long}`, measure, width: 60, drop })[0].drop).toBe("I");
+  });
+});
+
 describe("lines beside the drop cap", () => {
   it("leave the cap's width and the page's gap beside it", () => {
     expect(DROP_GAP).toBe(8);
@@ -420,7 +435,8 @@ describe("reasoning in a part still streaming", () => {
       expect(paginateChapter(chapter(text), opts).flatMap((page) => page.lines)).toEqual([]);
     }
     const tag = paginateChapter(chapter("<b> is bold"), opts).flatMap((page) => page.lines);
-    expect(tag.map((l) => [l.drop, l.text])).toEqual([["<", "b> is bold"]]);
+    // Shown as sent; a tag is no letter for a drop cap.
+    expect(tag.map((l) => [l.drop, l.text])).toEqual([[undefined, "<b> is bold"]]);
   });
 });
 

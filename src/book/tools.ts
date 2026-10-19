@@ -85,6 +85,13 @@ export function footnoteSentence(
     return { text: asked ? `Asked a question: ${sentence(asked)}` : "Asked a question.", opensPlate: false };
   }
 
+  if (name === "execute") {
+    // opencode's code mode: a short script that calls other tools.
+    if (tool.status === "running" || tool.status === "pending") return { text: "Running a script…", opensPlate: false };
+    if (tool.status === "error") return { text: sentence(`The script failed${reason(tool.error)}`), opensPlate: false };
+    return { text: "Ran a script.", opensPlate: false };
+  }
+
   if (name === "webfetch") {
     const url = firstString(tool.input, ["url"]) ?? "a page";
     if (tool.status === "running" || tool.status === "pending") return { text: `Fetching ${url}…`, opensPlate: false };

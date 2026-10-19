@@ -255,8 +255,8 @@ export async function openChapter(
   directory: string,
   opts: { askBeforeWrite: boolean; model?: ModelRef | null } & Notices,
 ): Promise<SessionInfo> {
+  // No title: a session made with one is never named by the press, so every chapter stayed "Untitled".
   const session = await client.createSession({
-    title: "Untitled",
     directory,
     permissions: opts.askBeforeWrite ? ASK_RULES : undefined,
     model: opts.model ?? undefined,

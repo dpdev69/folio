@@ -261,6 +261,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 }
 .line.justify { text-align: justify; text-align-last: justify; }
 .line.ragged, .ragged .line.justify { text-align: left; text-align-last: auto; }
+/* Handwriting is never spaced out to the margin. */
+.line.ink.justify { text-align: left; text-align-last: auto; }
 .line.ink, .quill, .ink-line, .chip {
   font-family: Caveat, cursive;
   color: var(--quill);
@@ -280,6 +282,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
 .em { font-style: italic; }
 .hl { background: linear-gradient(var(--highlight), var(--highlight)); }
 .fn-mark, .fn-num { color: var(--terra); font-size: 0.72em; margin-left: 1px; }
+/* Raised without growing the line box, so a line with marks keeps its baseline. */
+.fn-mark { line-height: 0; vertical-align: baseline; position: relative; top: -0.5em; }
 .fn-num { margin-right: 8px; font-style: normal; }
 
 .foot { flex: none; }

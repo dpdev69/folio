@@ -27,6 +27,26 @@ const question: Form = {
 };
 
 describe("FormView", () => {
+  it("sets the press's Markdown in italics rather than showing it raw", () => {
+    const html = render({
+      id: "frm",
+      title: "Questions",
+      fields: [
+        {
+          key: "q0",
+          title: "Greeting language",
+          description: "Which language should `greet` use?",
+          type: "string",
+          options: [{ value: "Keep", label: "Keep English", description: "Matches the *existing* `shout` helper." }],
+        },
+      ],
+    });
+    expect(html).not.toContain("`");
+    expect(html).not.toContain("*existing*");
+    expect(html).toContain("Which language should <em>greet</em> use?");
+    expect(html).toContain("Matches the <em>existing</em> <em>shout</em> helper.");
+  });
+
   it("sets each option's description as a quiet line beneath it", () => {
     const html = render(question);
     expect(html).toContain('class="form-options described"');
