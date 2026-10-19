@@ -251,7 +251,11 @@ export function renameBlock(chapter: Chapter, from: string, to: string): Chapter
       if (plateId !== f.plateId) note = { ...note, plateId };
       return note;
     }),
-    plates: chapter.plates.map((p) => (p.turnMessageId === from ? { ...p, id: renamePlate(p.id)!, turnMessageId: to } : p)),
+    plates: chapter.plates.map((p) => {
+      if (p.turnMessageId !== from) return p;
+      const id = renamePlate(p.id)!;
+      return id === p.id ? { ...p, turnMessageId: to } : { ...p, id, formerId: p.id, turnMessageId: to };
+    }),
     turns,
   };
 }

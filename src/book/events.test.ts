@@ -1110,6 +1110,8 @@ describe("renaming a prompt line", () => {
     next = { ...next, chapters: [{ ...next.chapters[0], plates: [{ ...plate, status: "accepted" }], footnotes: [{ id: "f", n: 1, blockId: "msg_a1:t0", offset: 0, text: "Edited a.ts.", plateId: plate.id }] }] };
     const renamed = renameBlock(next.chapters[0], "local-1", "msg_u1");
     expect(renamed.plates[0]).toMatchObject({ id: "diff-a.ts@msg_u1", turnMessageId: "msg_u1", status: "accepted" });
+    // A Reject that read the old id while the prompt was answered still finds its plate.
+    expect(renamed.plates[0].formerId).toBe("diff-a.ts@local-1");
     expect(renamed.footnotes[0].plateId).toBe("diff-a.ts@msg_u1");
     // The diff read again for the real turn finds the same plate, not a second one.
     const again = applyEvent({ ...next, chapters: [renamed] }, ev("folio.diff", { diff: [{ file: "a.ts", patch, status: "modified" }], turnMessageId: "msg_u1" }));

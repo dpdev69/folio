@@ -9,7 +9,7 @@ Collected from the per-task and final reviews. None blocks a session; each is a 
 Next, in order of value:
 
 1. A live end-to-end run against a real press with the current build, recorded as new rows in `docs/e2e.md`: a streamed turn with the settling lines and the auto turn, a plate laid from its slip, Reject with "Restoring the file…", an ask and a question form at the page foot (the foot overlays the page above 900 px since `ceaba2d`), the margin note, and a window resized mid-chapter. The layout since `ceaba2d` was verified in the dev app at three sizes, not in the packaged app.
-2. The Reject-in-flight race (State and engine, first bullet): make `rejectPlate` resolve the plate by its renamed id, or hold the rename until the write returns.
+2. ~~The Reject-in-flight race~~: closed on 2026-10-19; a renamed diff plate keeps its old id as `formerId`, and `mutatePlate` matches either.
 3. A signed release: run `scripts/release-macos.sh` with the Apple secrets, bump `package.json` to 0.3.0, tag it, and write a short changelog from `git log d5e9d0f..`. Pins for the next opencode version go in `scripts/opencode-checksums.json` when the sidecar is bumped.
 4. Interface edges below: a lighter appearance menu, the 6-line floor on very short windows, the three line-height estimates the CSS does not state.
 5. Housekeeping: `calls` and `turns` growth, the transitional `Frame` index signature, the plate store's old `@local-…` keys.
@@ -27,7 +27,6 @@ Closed on 2026-10-14: all six 2.0.28 archives are pinned since `1c9b681` (the RE
 
 ## State and engine
 
-- A Reject in flight can stick: if the prompt reply renames `diff-<file>@local-…` while that Reject is running, the status write misses and the plate reads "Restoring the file…" until a reload. The window is a few hundred milliseconds.
 - A held stream opens the restart gate, except after more than five restarts in two minutes, when restarts stay at least ten seconds apart.
 - Plate store: the old `@local-…` key of a renamed plate stays in storage until the cap clears it.
 - `calls` and `turns` on a chapter grow without bound; the transitional `Frame` index signature and `EventFrame.properties` remain.
