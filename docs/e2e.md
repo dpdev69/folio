@@ -88,6 +88,8 @@ The scratch repository was `greeter` (`src/greet.ts`, `src/shout.ts`, `src/index
 
 Found in this run and left for the interface pass: the drop cap in row 41; the toggle in the menu leaves the menu open (row 39); and "This plate cannot be set back on its own." for a plate whose turn is not named yet (row 38) reads as final, though Reject works a moment later. Not tested here: the packaged window itself (rows 17, 18 and 21 to 22 cover it on 2.0.28), the margin note, the question form and a window resize.
 
+After this run: the drop cap of row 41 is whole (`.line.with-drop` shows its overflow and clips only its words; checked in the browser, cap 145–187 px over its 143–172 px line), and the refusal of row 38 now reads "The press is still setting this plate. Reject it again in a moment." while the plate's turn is still `local-…`. The menu staying open after the ask toggle is kept: it shows the new state.
+
 ## Notes
 
 - Defect fixes routed into this run: footnote paths from the book's root (`3ad63c6`), room at the page foot
