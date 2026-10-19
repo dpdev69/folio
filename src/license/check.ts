@@ -1,7 +1,6 @@
 /**
- * License seam. Folio is commercial software; this build does not yet check a
- * key. A later edition replaces `uncheckedLicense` and keeps `licenseBlocks`
- * as the only gate in front of the press.
+ * License seam, left from before Folio was open source (MIT). It checks no key:
+ * `uncheckedLicense` is all there is, and `licenseBlocks` never stops the press.
  */
 export type LicenseState = "unchecked" | "valid" | "invalid" | "expired";
 

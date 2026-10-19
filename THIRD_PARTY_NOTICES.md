@@ -1,6 +1,6 @@
 # Third-party notices
 
-Folio is commercial software. It runs [opencode](https://github.com/anomalyco/opencode) as a separate sidecar and does not fork it. The press remains under its own license.
+Folio is open source under the MIT license (see LICENSE). It runs [opencode](https://github.com/anomalyco/opencode) as a separate sidecar and does not fork it. The press remains under its own license.
 
 ## opencode
 

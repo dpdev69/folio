@@ -3,6 +3,7 @@ name = "folio"
 version = "0.2.0"
 description = "Folio, a book-skinned desktop client for the opencode server."
 authors = ["Folio"]
+license = "MIT"
 edition = "2021"
 rust-version = "1.77"
 

@@ -1,6 +1,7 @@
 {
   "name": "folio",
   "private": true,
+  "license": "MIT",
   "version": "0.2.0",
   "description": "Folio is a book-skinned desktop client for the opencode server.",
   "type": "module",
