@@ -17,11 +17,7 @@ export function LineView({ line, marks }: { line: LaidLine; marks: Range[] }) {
           {piece.text}
         </span>
       ))}
-      {line.notes.map((n) => (
-        <sup key={n} className="fn-mark">
-          {n}
-        </sup>
-      ))}
+      {line.notes.length ? <sup className="fn-mark">{markLabel(line.notes)}</sup> : null}
     </span>
   );
   return (
@@ -33,6 +29,20 @@ export function LineView({ line, marks }: { line: LaidLine; marks: Range[] }) {
       {body}
     </div>
   );
+}
+
+/** Footnote marks as one superscript: "1,2", "3–7", "8–10,12", so a run never reads as one number. */
+export function markLabel(notes: number[]): string {
+  const sorted = [...new Set(notes)].sort((a, b) => a - b);
+  const runs: [number, number][] = [];
+  for (const n of sorted) {
+    const run = runs[runs.length - 1];
+    if (run && n === run[1] + 1) run[1] = n;
+    else runs.push([n, n]);
+  }
+  return runs
+    .flatMap(([from, to]) => (to - from >= 2 ? [`${from}\u2013${to}`] : from === to ? [`${from}`] : [`${from}`, `${to}`]))
+    .join(",");
 }
 
 function pieceClass(piece: { italic: boolean; mark: boolean }): string {

@@ -62,6 +62,14 @@ describe("footnotes for opencode 2.0 tools", () => {
     expect(footnoteSentence({ ...edit, status: "running" }).text).toBe("Editing src/greet.ts…");
   });
 
+  it("words code mode's execute call as a script", () => {
+    expect(footnoteSentence({ tool: "execute", status: "running", input: { code: "await tools.read({})" } }).text).toBe("Running a script…");
+    expect(footnoteSentence({ tool: "execute", status: "completed", input: { code: "text(1)" } }).text).toBe("Ran a script.");
+    expect(footnoteSentence({ tool: "execute", status: "error", error: "Unknown tool 'shell'." }).text).toBe(
+      "The script failed: Unknown tool 'shell'.",
+    );
+  });
+
   it("reads path as well as filePath", () => {
     expect(footnoteSentence({ tool: "read", input: { path: "src/greet.ts" }, status: "completed" }).text).toBe(
       "Read src/greet.ts.",

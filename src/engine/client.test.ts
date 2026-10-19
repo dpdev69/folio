@@ -86,6 +86,13 @@ describe("EngineClient against the replay press", () => {
     expect(requests.at(-1)?.body).toEqual({ title: "Untitled", location: { directory: "/book" }, permissions: rules });
   });
 
+  it("leaves the title out when none is given, so the press can name the session", async () => {
+    const { url, requests } = await press();
+    const client = new EngineClient(url, { password: "pw" });
+    await client.createSession({ directory: "/book" });
+    expect(requests.at(-1)?.body).toEqual({ location: { directory: "/book" } });
+  });
+
   it("returns the user message id from a prompt and streams the turn unfiltered", async () => {
     const { url, requests } = await press();
     const client = new EngineClient(url, { password: "pw" });

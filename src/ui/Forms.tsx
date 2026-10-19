@@ -1,4 +1,5 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
+import { toProse } from "../book/emphasis";
 import { formAnswer, type FormReply, type FormValue, type FormValues } from "../book/forms";
 import type { Form, FormField } from "../book/model";
 
@@ -24,8 +25,14 @@ export function FormView({ form, onSend, onSkip }: { form: Form; onSend: (answer
     >
       {form.fields.map((field) => (
         <fieldset key={field.key} className="form-field">
-          <legend>{field.title}</legend>
-          {field.description ? <p className="form-desc">{field.description}</p> : null}
+          <legend>
+            <Inline text={field.title} />
+          </legend>
+          {field.description ? (
+            <p className="form-desc">
+              <Inline text={field.description} />
+            </p>
+          ) : null}
           <FieldInput field={field} value={values[field.key]} onChange={(value) => set(field.key, value)} />
         </fieldset>
       ))}
@@ -42,6 +49,20 @@ export function FormView({ form, onSend, onSkip }: { form: Form; onSend: (answer
   );
 }
 
+/** The press writes Markdown: `code` and *emphasis* are set in italics, as on the page, never shown raw. */
+function Inline({ text }: { text: string }) {
+  const { text: plain, italics } = toProse(text);
+  const out: ReactNode[] = [];
+  let at = 0;
+  for (const [from, to] of italics) {
+    if (from > at) out.push(plain.slice(at, from));
+    out.push(<em key={from}>{plain.slice(from, to)}</em>);
+    at = to;
+  }
+  if (at < plain.length) out.push(plain.slice(at));
+  return <>{out}</>;
+}
+
 function FieldInput({ field, value, onChange }: { field: FormField; value: FormValue; onChange: (value: FormValue) => void }) {
   const descBase = useId();
   // With any option described, the options stand one above another, each with its quiet line beneath.
@@ -51,7 +72,7 @@ function FieldInput({ field, value, onChange }: { field: FormField; value: FormV
   const desc = (description: string | undefined, index: number) =>
     description ? (
       <span className="form-option-desc" id={descId(index)}>
-        {description}
+        <Inline text={description} />
       </span>
     ) : null;
   if (field.type === "boolean") {
@@ -80,7 +101,7 @@ function FieldInput({ field, value, onChange }: { field: FormField; value: FormV
                   onChange(event.target.checked ? [...picked, option.value] : picked.filter((item) => item !== option.value))
                 }
               />
-              {option.label}
+              <Inline text={option.label} />
             </label>
             {desc(option.description, index)}
           </span>
@@ -117,7 +138,7 @@ function FieldInput({ field, value, onChange }: { field: FormField; value: FormV
                 aria-describedby={option.description ? descId(index) : undefined}
                 onClick={() => onChange(option.value)}
               >
-                {option.label}
+                <Inline text={option.label} />
               </button>
               {desc(option.description, index)}
             </span>

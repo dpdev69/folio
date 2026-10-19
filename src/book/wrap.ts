@@ -32,7 +32,9 @@ export function wrapParagraph(opts: {
   const source = opts.text.replace(/\s+/g, " ").trim();
   if (!source) return [];
 
-  const drop = opts.drop;
+  // A drop cap is a letter or a figure, and never one before an apostrophe: "I'll" would be
+  // set as a lone "I" beside "'ll".
+  const drop = opts.drop && /^[\p{L}\p{N}](?!['’])/u.test(source) ? opts.drop : undefined;
   const dropChar = drop ? source.slice(0, 1) : "";
   const body = drop ? source.slice(1).trimStart() : source;
   const bodyShift = source.length - body.length;
@@ -56,6 +58,10 @@ export function wrapParagraph(opts: {
     draft.push({ text: taken, start: bodyShift + cursor });
     index += count;
   }
+
+  // A paragraph shorter than the drop cap would leave the letter cut off at its line's foot;
+  // it is set without one.
+  if (drop && draft.length > 0 && draft.length < drop.lines) return wrapParagraph({ ...opts, drop: undefined });
 
   const lines: WrappedLine[] = draft.map((line, lineNo) => ({
     text: line.text,
