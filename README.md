@@ -1,6 +1,6 @@
 # Folio
 
-Folio is a commercial, closed-source desktop reading room for [opencode](https://opencode.ai). A repository is a book. Each opencode session is a chapter. You write on the page.
+Folio is an open-source desktop reading room for [opencode](https://opencode.ai), by [Basalt](https://hellobasalt.dev). A repository is a book. Each opencode session is a chapter. You write on the page.
 
 The shell is Tauri 2. The pages are React, TypeScript, and Vite. opencode is not forked: Folio runs `opencode serve` as a separate process, which this document calls the press, and speaks its HTTP API. opencode is MIT licensed; the notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
@@ -119,9 +119,11 @@ The press can stall, restart, or go away, and the book should not lose its place
 - Requests to the press time out after 15 seconds and report in plain words: "The press could not be reached", a wrong password, a page the press does not know (with its version).
 - Event types and tool shapes Folio does not know are ignored, so a newer press does not break the page.
 
-## License seam
+## License
 
-`src/license/check.ts` and the Tauri command `license_check` are the only gate in front of the press. This edition returns `unchecked` and does not block. `invalid` and `expired` would.
+Folio is MIT licensed; see [LICENSE](LICENSE). The bundled opencode binary keeps its own MIT notice in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+`src/license/check.ts` and the Tauri command `license_check` are a leftover seam in front of the press. They return `unchecked` and never block.
 
 ## Tests
 
