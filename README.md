@@ -2,6 +2,8 @@
 
 Folio is an open-source desktop reading room for [opencode](https://opencode.ai), by [Basalt](https://hellobasalt.dev). A repository is a book. Each opencode session is a chapter. You write on the page.
 
+Website and downloads: [folio.hellobasalt.dev](https://folio.hellobasalt.dev/). Every release is on the [releases page](https://github.com/dpdev69/folio/releases), with install steps in [CHANGELOG.md](CHANGELOG.md).
+
 The shell is Tauri 2. The pages are React, TypeScript, and Vite. opencode is not forked: Folio runs `opencode serve` as a separate process, which this document calls the press, and speaks its HTTP API. opencode is MIT licensed; the notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## What the first launch does
@@ -184,6 +186,12 @@ The CI macOS job passes the certificate, identity, and Apple ID variables throug
 codesign -dv --verbose=2 src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Folio.app
 ```
 
+## Website
+
+`site/` is the static site at [folio.hellobasalt.dev](https://folio.hellobasalt.dev/): plain HTML and CSS with no build step, served by Cloudflare Pages from `main` (output directory `site`). `site/_headers` sets the security headers. The screenshots in `site/assets/` are taken from the real app.
+
 ## CI
 
 `.github/workflows/build.yml` runs the unit tests and the web build, then fetches the bundled press and runs `tauri build` on Linux (deb, AppImage), macOS (app, dmg), and Windows (nsis, msi).
+
+To publish a release, bump the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, add its section to `CHANGELOG.md`, merge to `main`, then run the workflow from `main` with **release** (and **intel**) ticked. The `release` job tags `v<version>` on that commit and attaches the dmg, the Windows installers, the deb, the AppImage and `SHA256SUMS.txt`, with the changelog section as the notes.

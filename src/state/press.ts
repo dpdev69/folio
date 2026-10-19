@@ -382,6 +382,9 @@ export function revertNote(file: string): string {
 /** Said when a plate has no patch of its own to reverse. */
 export const CANNOT_REVERT = "This plate cannot be set back on its own.";
 
+/** Said when the plate's turn is still waiting for the press to name it; Reject works once it has. */
+export const NOT_SET_YET = "The press is still setting this plate. Reject it again in a moment.";
+
 /**
  * Undo one plate's file: reverse the plate's own patch against the file as it
  * is now, write it back through Folio, and tell the model. A later change to
@@ -391,7 +394,7 @@ export const CANNOT_REVERT = "This plate cannot be set back on its own.";
  */
 export async function revertPlate(client: EngineClient, book: Book, chapter: Chapter, plate: Plate, opts: Notices = {}): Promise<EventFrame> {
   // Without its own patch a plate cannot be told apart from later changes to the file.
-  if (!plate.patch) throw new Error(CANNOT_REVERT);
+  if (!plate.patch) throw new Error(isLocalId(plate.turnMessageId) ? NOT_SET_YET : CANNOT_REVERT);
   const created = createsFile(plate);
   const removed = plate.change === "deleted" || patchSides(plate.patch).newEmpty;
   const moved = new Error(`${plate.file} has changed since this plate was set, so it was left as it is.`);
