@@ -4,7 +4,7 @@ Folio is commercial software. It runs [opencode](https://github.com/anomalyco/op
 
 ## opencode
 
-The Folio installer bundles the opencode CLI binary, version 2.0.28, unmodified, as a sidecar next to the application executable. The binary is downloaded from the upstream release at build time; its source is at https://github.com/anomalyco/opencode.
+The Folio installer bundles the opencode CLI binary, version 2.0.32, unmodified, as a sidecar next to the application executable. The binary is downloaded from the upstream release at build time; its source is at https://github.com/anomalyco/opencode.
 
 MIT License
 
