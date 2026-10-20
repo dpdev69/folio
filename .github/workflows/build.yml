@@ -9,6 +9,10 @@ on:
         description: Also build the Intel macOS app and dmg (x86_64-apple-darwin)
         type: boolean
         default: false
+      release:
+        description: Publish a GitHub release v<package.json version> from main with every bundle (tick intel too)
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -118,3 +122,39 @@ jobs:
             src-tauri/target/x86_64-apple-darwin/release/bundle/**
           if-no-files-found: error
           retention-days: 3
+
+  # Run on demand from main (Actions, "Run workflow", tick release and intel): tags
+  # v<package.json version> on this commit and publishes the bundles, a SHA256SUMS.txt
+  # and that version's CHANGELOG.md section as a GitHub release.
+  release:
+    name: release
+    if: >-
+      !cancelled() && github.event_name == 'workflow_dispatch' && inputs.release &&
+      github.ref == 'refs/heads/main' && needs.desktop.result == 'success' &&
+      (needs.desktop-intel.result == 'success' || needs.desktop-intel.result == 'skipped')
+    needs: [desktop, desktop-intel]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: bundles
+      - name: Collect the installers
+        shell: bash
+        run: |
+          mkdir out
+          find bundles -type f \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' \) -exec cp {} out/ \;
+          (cd out && sha256sum * > SHA256SUMS.txt)
+          ls -la out
+          cat out/SHA256SUMS.txt
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          awk -v v="## $version" '$0 ~ "^"v {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for $version"; exit 1; }
+          gh release create "v$version" out/* --target "$GITHUB_SHA" --title "Folio $version" --notes-file notes.md

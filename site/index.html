@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Folio: read your opencode sessions like a book</title>
+<meta name="description" content="Folio is a free, open-source desktop app for opencode. Each session is a chapter: your words in ink, commands as footnotes, and every edit as a plate you accept or reject.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ebe4d8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141210" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://folio.hellobasalt.dev/">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Folio">
+<meta property="og:url" content="https://folio.hellobasalt.dev/">
+<meta property="og:title" content="Folio: read your opencode sessions like a book">
+<meta property="og:description" content="A free, open-source desktop app for opencode. Commands become footnotes, edits become plates you accept or reject.">
+<meta property="og:image" content="https://folio.hellobasalt.dev/assets/og-image.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A Folio spread: a request in handwriting on the left page with footnotes, and the change it made set as a plate on the right page.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Folio: read your opencode sessions like a book">
+<meta name="twitter:description" content="A free, open-source desktop app for opencode. Commands become footnotes, edits become plates you accept or reject.">
+<meta name="twitter:image" content="https://folio.hellobasalt.dev/assets/og-image.png">
+<meta name="twitter:image:alt" content="A Folio spread: a request in handwriting on the left page with footnotes, and the change it made set as a plate on the right page.">
+
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+<link rel="apple-touch-icon" href="/assets/icon-256.png">
+<link rel="preload" href="/assets/fonts/eb-garamond-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/site.css?v=1">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "Folio", "description": "A free, open-source desktop app for opencode that sets each coding-agent session as a chapter of a book: commands as footnotes, edits as plates you accept or reject.", "applicationCategory": "DeveloperApplication", "operatingSystem": "macOS 12 or later, Windows 10 or later, Linux", "softwareVersion": "0.3.0", "url": "https://folio.hellobasalt.dev/", "downloadUrl": "https://github.com/dpdev69/folio/releases/latest", "installUrl": "https://github.com/dpdev69/folio/releases/latest", "image": "https://folio.hellobasalt.dev/assets/og-image.png", "screenshot": "https://folio.hellobasalt.dev/assets/shot-plate.webp", "license": "https://opensource.org/licenses/MIT", "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "author": {"@type": "Organization", "name": "Folio contributors", "url": "https://github.com/dpdev69/folio"}, "publisher": {"@type": "Organization", "@id": "https://hellobasalt.dev/#org", "name": "Basalt Studio", "alternateName": "Basalt", "url": "https://hellobasalt.dev/", "sameAs": ["https://x.com/hellobasalt", "https://www.youtube.com/@hellobasalt"]}, "sameAs": ["https://github.com/dpdev69/folio"]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebSite", "name": "Folio", "url": "https://folio.hellobasalt.dev/", "publisher": {"@id": "https://hellobasalt.dev/#org"}}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Is Folio free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Folio is open source under the MIT license. There is no account and nothing to buy. The free OpenCode Zen models need no key; other providers bill you directly if you paste their key."}}, {"@type": "Question", "name": "Do I need to install opencode first?", "acceptedAnswer": {"@type": "Answer", "text": "No. The installer carries opencode 2.0.32 and starts it for you on a random local port with a password made for that launch. You can also attach Folio to an opencode server you started yourself."}}, {"@type": "Question", "name": "Does Folio replace opencode?", "acceptedAnswer": {"@type": "Answer", "text": "No. opencode does the work. Folio is a different way to read and steer it: it talks to opencode's own HTTP API and does not fork or patch it."}}, {"@type": "Question", "name": "Will it touch my own opencode setup?", "acceptedAnswer": {"@type": "Answer", "text": "The bundled opencode keeps its sessions, keys and cache in Folio's own app data folder. It never opens your opencode database, and your opencode config folder stays yours."}}, {"@type": "Question", "name": "Does Folio send my code anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Folio itself sends nothing to Basalt. opencode sends your prompts and the files it reads to the model provider you choose, the same as it does in the terminal."}}, {"@type": "Question", "name": "macOS says it can't check Folio for malware. What do I do?", "acceptedAnswer": {"@type": "Answer", "text": "The build isn't signed with an Apple Developer ID yet. Open System Settings, then Privacy & Security, and click Open Anyway next to the message about Folio. If macOS says the app is damaged, run xattr -dr com.apple.quarantine /Applications/Folio.app in Terminal and open it again."}}]}</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.23c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49l-.01-1.7c-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.35 1.12 2.92.85.09-.67.35-1.12.64-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9l-.01 2.81c0 .27.18.6.69.49A10.14 10.14 0 0 0 22 12.23C22 6.58 17.52 2 12 2Z"/></symbol>
+  </defs>
+</svg>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="brand-lockup">
+      <a class="brand" href="/" aria-label="Folio home">
+        <img src="/assets/icon-256.png" alt="" width="28" height="28">
+        <span>Folio</span>
+      </a>
+      <a class="by-basalt" href="https://hellobasalt.dev/">by Basalt</a>
+    </div>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#how">How it reads</a>
+      <a href="#catch">The catch</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-end">
+      <a class="nav-gh" href="https://github.com/dpdev69/folio" aria-label="GitHub"><svg aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span></a>
+      <a class="btn btn-primary btn-sm" href="#download">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <div class="wrap hero-wrap">
+      <div class="floats" aria-hidden="true">
+        <figure class="float f1"><img src="/assets/card-ink.webp" alt="" width="500" height="90"></figure>
+        <figure class="float f2"><img src="/assets/card-notes.webp" alt="" width="460" height="158"></figure>
+        <figure class="float f3"><img src="/assets/card-contents.webp" alt="" width="480" height="210"></figure>
+        <figure class="float f4"><img src="/assets/card-actions.webp" alt="" width="500" height="272"></figure>
+      </div>
+      <div class="hero-center">
+        <p class="kicker">A reading room for opencode</p>
+        <h1>Your coding agent, <em>set as a book.</em></h1>
+        <p class="lede">Folio is a desktop app for opencode. Each session becomes a chapter you can read: your request in ink, every command a footnote, every edit a plate you accept or reject.</p>
+        <div class="actions">
+          <a class="btn btn-primary btn-lg" href="#download"><svg aria-hidden="true"><use href="#i-download"/></svg>Download Folio</a>
+          <a class="btn btn-secondary btn-lg" href="https://github.com/dpdev69/folio"><svg aria-hidden="true"><use href="#i-github"/></svg>View on GitHub</a>
+        </div>
+        <p class="trust">Free · MIT · macOS, Windows and Linux · <a href="https://github.com/dpdev69/folio/releases/latest">version 0.3.0</a></p>
+      </div>
+
+      <div class="hero-shot">
+        <figure class="frame"><img src="/assets/shot-plate.webp" alt="A Folio spread titled Chapter I, Add farewell function to src/greet.ts. The left page opens with a drop cap, then the request in blue handwriting, the reply in prose and eight footnotes for the files the agent read and the commands it ran. The right page shows Plate I, the diff for src/greet.ts, with Accept, Revise, Reject and Fold back under it." width="2200" height="1391" fetchpriority="high"></figure>
+        <p class="caption">A real session on opencode 2.0.32. opencode named the chapter from the request, and the edit it made faces the page as Plate I.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="eyebrow">How it reads</p>
+        <h2 id="how-title">A terminal scrolls past. A book keeps its place.</h2>
+        <p>Folio doesn't change what opencode does. It changes how you read it, so you can follow a long session the way you follow a chapter.</p>
+      </header>
+      <ul class="glossary">
+        <li><b>The book</b><span class="is">is a repository</span><p>Open a folder and it becomes the book. Contents lists every chapter, the ribbon marks your place and search looks through all of it.</p></li>
+        <li><b>A chapter</b><span class="is">is a session</span><p>opencode names each one from what you asked. You write in <span class="ink">ink</span> at the foot of the page and press Return twice to send.</p></li>
+        <li><b>Footnotes</b><span class="is">are commands</span><p>Every file read and command run settles into a numbered note<span class="mark">3–7</span> under the prose, so the reasoning stays readable.</p></li>
+        <li><b>Plates</b><span class="is">are changes</span><p>Each edit is a diff set on the facing page, captioned like a figure: Plate I, the file, lines added and removed.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="control-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="eyebrow">You stay in charge</p>
+        <h2 id="control-title">Read the change before you keep it.</h2>
+      </header>
+
+      <article class="feature">
+        <div class="feature-copy">
+          <h3>Every edit is a plate.</h3>
+          <p>When opencode changes a file, the diff faces the page that explains it. Four words sit under it:</p>
+          <ul>
+            <li><b>Accept</b> marks the plate as set.</li>
+            <li><b>Revise</b> puts “Revise the change in …” in the ink so you can say what you want instead.</li>
+            <li><b>Reject</b> reverses that plate's own patch on disk and tells opencode you declined it on purpose, so it doesn't try again. Later edits to the same file are left alone.</li>
+            <li><b>Fold back</b> puts the plate away until you want it.</li>
+          </ul>
+        </div>
+        <figure class="frame"><img src="/assets/shot-plate-crop.webp" alt="Plate I, src/greet.ts, plus four lines: a new farewell function under greet, with Accept, Revise, Reject and Fold back underneath." width="1060" height="780" loading="lazy"></figure>
+      </article>
+
+      <article class="feature flip">
+        <div class="feature-copy">
+          <h3>Ask before it writes.</h3>
+          <p>Turn on <b>Ask before the press writes</b> in the menu and opencode stops before each edit and each shell command. The question sits at the foot of the page with the proposed change facing it.</p>
+          <p>The answers are <b>Allow once</b> and <b>No</b>. There's deliberately no “Always”: in opencode that saves a rule for the whole project, and one click would quietly switch the setting off.</p>
+        </div>
+        <figure class="frame"><img src="/assets/shot-ask.webp" alt="Chapter II paused before an edit: the request in ink on the left, May I edit src/greet.ts? Allow once · No at the foot of the page, and the proposed one-line comment set as Plate I on the right." width="1280" height="840" loading="lazy"></figure>
+      </article>
+
+      <article class="feature">
+        <div class="feature-copy">
+          <h3>It brings its own opencode.</h3>
+          <p>The installer carries opencode 2.0.32 and starts it for you on a random local port, with a password made for that launch. It keeps its own sessions and keys, so your opencode setup stays untouched.</p>
+          <p>The free OpenCode Zen models work without a key. Paste a key for another provider if you have one, or attach Folio to an opencode server you already run.</p>
+        </div>
+        <figure class="frame"><img src="/assets/shot-title.webp" alt="Folio's title page: The press is ready. Using opencode 2.0.32 with a free OpenCode Zen model. Open a folder, use a provider key, or read the sample." width="1600" height="1012" loading="lazy"></figure>
+      </article>
+
+      <article class="feature flip">
+        <div class="feature-copy">
+          <h3>Six themes, light and dark.</h3>
+          <p>Original, Quiet, Paper, Bold, Calm and Focus each pair a typeface with a palette in both appearances. Text size, line spacing, margins and justified text are yours to set, and every theme keeps its ink readable on the page.</p>
+          <p>Highlight a passage to write in the margin. The reply sits beside your note and can replace the passage.</p>
+        </div>
+        <figure class="frame"><img src="/assets/shot-themes.webp" alt="A chapter in the dark appearance with the Calm theme, and the Themes and Settings menu open: text size, appearance, and six swatches, Original, Quiet, Paper, Bold, Calm and Focus." width="1600" height="1012" loading="lazy"></figure>
+      </article>
+    </div>
+  </section>
+
+  <section class="section" id="catch" aria-labelledby="catch-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="eyebrow">The catch</p>
+        <h2 id="catch-title">What you should know first.</h2>
+        <p>Folio is young. Here is what that means today.</p>
+      </header>
+      <ul class="catch">
+        <li><h3>It's early.</h3><p>This is version 0.3. The core works and has 364 tests behind it, but expect rough edges, and please <a href="https://github.com/dpdev69/folio/issues">report them</a>.</p></li>
+        <li><h3>The builds aren't signed yet.</h3><p>macOS and Windows will warn the first time you open it. The steps to get past that are below, next to each download.</p></li>
+        <li><h3>Free models come and go.</h3><p>OpenCode Zen decides which free models exist and how much you can use them. They can be busy or rate limited. A provider key avoids that.</p></li>
+        <li><h3>It's an agent on your machine.</h3><p>opencode reads files and runs commands in the folder you open, as it does in the terminal. Turn on Ask before the press writes if you want to approve each step.</p></li>
+        <li><h3>It's a reader, not an editor.</h3><p>There's no file tree, terminal or code editor. Keep your editor open next to it; Folio is for following and steering the agent.</p></li>
+        <li><h3>Intel Macs are untested.</h3><p>The Intel dmg is cross-built on an Apple silicon machine and hasn't been run on an Intel Mac yet. If it misbehaves, <a href="https://github.com/dpdev69/folio/issues">tell us</a>.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section download" id="download" aria-labelledby="download-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="eyebrow">Download</p>
+        <h2 id="download-title">Get Folio 0.3.0.</h2>
+        <p>Every file is on the <a href="https://github.com/dpdev69/folio/releases/latest">GitHub release page</a>, built by GitHub Actions from the public source.</p>
+      </header>
+      <div class="platforms">
+        <article class="platform">
+          <h3>macOS</h3>
+          <p class="files">.dmg · macOS 12+ · Apple silicon or Intel</p>
+          <ol>
+            <li>Open the dmg and drag Folio to Applications.</li>
+            <li>Open Folio. When macOS says it can't check it, open System Settings → Privacy &amp; Security and click <b>Open Anyway</b>.</li>
+            <li>If macOS says Folio is damaged, run <code>xattr -dr com.apple.quarantine /Applications/Folio.app</code> in Terminal, then open it again.</li>
+          </ol>
+          <a class="btn btn-primary" href="https://github.com/dpdev69/folio/releases/latest"><svg aria-hidden="true"><use href="#i-download"/></svg>Download for Mac</a>
+        </article>
+        <article class="platform">
+          <h3>Windows</h3>
+          <p class="files">-setup.exe or .msi · Windows 10+ · x64</p>
+          <ol>
+            <li>Run the installer.</li>
+            <li>If SmartScreen says it protected your PC, click <b>More info</b>, then <b>Run anyway</b>.</li>
+          </ol>
+          <a class="btn btn-primary" href="https://github.com/dpdev69/folio/releases/latest"><svg aria-hidden="true"><use href="#i-download"/></svg>Download for Windows</a>
+        </article>
+        <article class="platform">
+          <h3>Linux</h3>
+          <p class="files">.deb or .AppImage · x86_64</p>
+          <ol>
+            <li>Debian and Ubuntu: <code>sudo apt install ./</code> followed by the .deb file name.</li>
+            <li>Anything else: make the AppImage executable and run it.</li>
+          </ol>
+          <a class="btn btn-primary" href="https://github.com/dpdev69/folio/releases/latest"><svg aria-hidden="true"><use href="#i-download"/></svg>Download for Linux</a>
+        </article>
+      </div>
+      <p class="note">Rather build it yourself? You need Node 22 and Rust. The <a href="https://github.com/dpdev69/folio#develop">README</a> has the three commands.</p>
+    </div>
+  </section>
+
+  <section class="section" id="faq" aria-labelledby="faq-title">
+    <div class="wrap">
+      <header class="section-head">
+        <p class="eyebrow">FAQ</p>
+        <h2 id="faq-title">Questions</h2>
+      </header>
+      <div class="faq">
+        <details><summary>Is Folio free?</summary><p>Yes. Folio is open source under the MIT license. There is no account and nothing to buy. The free OpenCode Zen models need no key; other providers bill you directly if you paste their key.</p></details>
+        <details><summary>Do I need to install opencode first?</summary><p>No. The installer carries opencode 2.0.32 and starts it for you on a random local port with a password made for that launch. You can also attach Folio to an opencode server you started yourself.</p></details>
+        <details><summary>Does Folio replace opencode?</summary><p>No. opencode does the work. Folio is a different way to read and steer it: it talks to opencode's own HTTP API and does not fork or patch it.</p></details>
+        <details><summary>Will it touch my own opencode setup?</summary><p>The bundled opencode keeps its sessions, keys and cache in Folio's own app data folder. It never opens your opencode database, and your opencode config folder stays yours.</p></details>
+        <details><summary>Does Folio send my code anywhere?</summary><p>Folio itself sends nothing to Basalt. opencode sends your prompts and the files it reads to the model provider you choose, the same as it does in the terminal.</p></details>
+        <details><summary>macOS says it can't check Folio for malware. What do I do?</summary><p>The build isn't signed with an Apple Developer ID yet. Open System Settings, then Privacy &amp; Security, and click Open Anyway next to the message about Folio. If macOS says the app is damaged, run <code>xattr -dr com.apple.quarantine /Applications/Folio.app</code> in Terminal and open it again.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/"><img src="/assets/icon-256.png" alt="" width="24" height="24" loading="lazy"><span>Folio</span></a>
+        <p>A desktop reading room for opencode: sessions as chapters, commands as footnotes, edits as plates. A Basalt app.</p>
+      </div>
+      <nav aria-labelledby="f-product">
+        <p class="f-title" id="f-product">Project</p>
+        <a href="#download">Download</a>
+        <a href="https://github.com/dpdev69/folio">GitHub</a>
+        <a href="https://github.com/dpdev69/folio/releases">Releases</a>
+        <a href="https://github.com/dpdev69/folio/issues">Report a bug</a>
+      </nav>
+      <nav aria-labelledby="f-basalt">
+        <p class="f-title" id="f-basalt">More from Basalt</p>
+        <a href="https://hellobasalt.dev/">Basalt</a>
+        <a href="https://upright.hellobasalt.dev/">Upright, free mouse app</a>
+        <a href="https://lull.hellobasalt.dev/">Lull, coming soon</a>
+        <a href="https://gocmeden.hellobasalt.dev/">Göçmeden, remote jobs</a>
+        <a href="https://cosmicpost.lol/">Cosmic Post, space photo keepsakes</a>
+        <a href="https://kacpapel.app/">Kaç Papel?, price game</a>
+        <a href="https://github.com/dpdev69/claude-fight-hud">Fight HUD for Claude Code</a>
+        <a href="https://byewall.hellobasalt.dev/">ByeWall, find archived pages</a>
+        <a href="https://kahve.hellobasalt.dev/">KahveDrop, coffee finder</a>
+        <a href="https://outcrop.hellobasalt.dev/">Outcrop, SEO for software makers</a>
+        <a href="https://x.com/hellobasalt">X @hellobasalt</a>
+        <a href="https://www.youtube.com/@hellobasalt">YouTube @hellobasalt</a>
+      </nav>
+      <nav aria-labelledby="f-help">
+        <p class="f-title" id="f-help">Help</p>
+        <a href="mailto:support@hellobasalt.dev">support@hellobasalt.dev</a>
+        <a href="/#faq">FAQ</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </div>
+    <div class="footer-base">
+      <p>© 2026 Folio contributors · MIT license · A <a href="https://hellobasalt.dev/">Basalt</a> app</p>
+      <p>opencode is an open-source project by its own authors. Folio is an independent app and is not affiliated with or endorsed by them.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

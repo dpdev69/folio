@@ -1,0 +1,24 @@
+# Folio
+
+> Folio is a free, open-source (MIT) desktop app for opencode, the open-source AI coding agent. It sets each opencode session as a chapter of a book: the request in handwriting, the agent's work as prose, every file read and command run as a numbered footnote, and every edit as a "plate" (a diff on the facing page) that you can accept, revise, reject or fold back. Made by Basalt Studio (https://hellobasalt.dev/).
+
+Platforms: macOS 12 or later (Apple silicon and Intel), Windows 10 or later, Linux (deb and AppImage, x86_64). Version 0.3.0. The installer bundles opencode 2.0.32 and starts it locally with a per-launch password; the free OpenCode Zen models need no key, other providers take a pasted key, and Folio can attach to an opencode server you already run. It does not fork or patch opencode; it uses opencode's HTTP API.
+
+Reject reverses that plate's own patch on disk and tells opencode the change was declined on purpose. "Ask before the press writes" makes opencode pause before each edit and shell command (Allow once or No). Six reading themes in light and dark. No account, no analytics, no telemetry. Builds are not code-signed yet, so macOS and Windows warn on first launch.
+
+## Pages
+
+- [Folio home](https://folio.hellobasalt.dev/): what it does, the catch, download and FAQ
+- [Privacy](https://folio.hellobasalt.dev/privacy): Folio sends nothing to Basalt; opencode talks to the model provider you choose
+- [Terms](https://folio.hellobasalt.dev/terms): MIT License, provided as is
+
+## Download and source
+
+- [Latest release](https://github.com/dpdev69/folio/releases/latest): macOS dmg, Windows installer, Linux deb and AppImage
+- [Source code](https://github.com/dpdev69/folio): Tauri 2, React, TypeScript
+
+## Optional
+
+- [Basalt Studio](https://hellobasalt.dev/): the studio that makes Folio
+- [opencode](https://opencode.ai/): the coding agent Folio reads
+- Support: support@hellobasalt.dev

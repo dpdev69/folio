@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Privacy · Folio</title>
+<meta name="description" content="Folio has no account, no analytics and no telemetry, and sends nothing to Basalt. What opencode sends to your model provider, and what this website counts.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ebe4d8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141210" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://folio.hellobasalt.dev/privacy">
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+<link rel="apple-touch-icon" href="/assets/icon-256.png">
+<link rel="stylesheet" href="/assets/site.css?v=1">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.23c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49l-.01-1.7c-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.35 1.12 2.92.85.09-.67.35-1.12.64-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.4 9.4 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9l-.01 2.81c0 .27.18.6.69.49A10.14 10.14 0 0 0 22 12.23C22 6.58 17.52 2 12 2Z"/></symbol>
+  </defs>
+</svg>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <div class="brand-lockup">
+      <a class="brand" href="/" aria-label="Folio home">
+        <img src="/assets/icon-256.png" alt="" width="28" height="28">
+        <span>Folio</span>
+      </a>
+      <a class="by-basalt" href="https://hellobasalt.dev/">by Basalt</a>
+    </div>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="/#how">How it reads</a>
+      <a href="/#catch">The catch</a>
+      <a href="/#faq">FAQ</a>
+    </nav>
+    <div class="nav-end">
+      <a class="nav-gh" href="https://github.com/dpdev69/folio" aria-label="GitHub"><svg aria-hidden="true"><use href="#i-github"/></svg><span>GitHub</span></a>
+      <a class="btn btn-primary btn-sm" href="/#download">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="doc">
+<div class="wrap doc-wrap">
+<p class="eyebrow">Privacy</p>
+<h1>Privacy policy</h1>
+<p class="doc-meta">Last updated October 20, 2026</p>
+<p class="lede-doc">Folio has no account, no analytics and no telemetry. It sends nothing to Basalt.</p>
+
+<h2>Who is responsible</h2>
+<p>Folio is published by Basalt (<a href="https://hellobasalt.dev/">hellobasalt.dev</a>), an independent software studio. For any privacy question or request, write to <a href="mailto:support@hellobasalt.dev">support@hellobasalt.dev</a>.</p>
+
+<h2>The Folio app</h2>
+<ul>
+<li><b>What it runs.</b> Folio starts a copy of opencode (the "press") on your computer, on a local address only it knows, with a password made for each launch. The window talks to it over that local connection.</li>
+<li><b>What leaves your computer.</b> opencode sends your messages, and the parts of your files it reads, to the AI model provider you choose (by default the free OpenCode Zen models run by the opencode team; or a provider whose key you paste). That is how any coding agent works. Those providers' own privacy terms apply. Basalt never sees this traffic.</li>
+<li><b>What it stores.</b> opencode keeps your sessions, any provider keys you paste, and its cache in Folio's app data folder on your computer (on macOS, <code>~/Library/Application Support/app.folio.desktop/press</code>). Folio keeps its reading settings and which plates you accepted or folded in the window's local storage. None of it is uploaded.</li>
+<li><b>Your files.</b> Folio reads and writes files only inside the folder you open as a book, and only to show or undo the changes opencode makes.</li>
+<li><b>Installing opencode.</b> If you run Folio without its bundled copy and choose <b>Install opencode</b>, it runs the official installer from opencode.ai.</li>
+</ul>
+
+<h2>This website</h2>
+<p>This site is a set of static pages served by Cloudflare. It has no accounts, forms, advertising or tracking scripts, and its fonts are served from this site.</p>
+<ul>
+<li><b>Visit statistics.</b> We use Cloudflare Web Analytics to count visits. It shows us aggregate numbers only (page views, country, browser type, referring site and load speed), sets no cookies and creates no identifier that recognises you.</li>
+<li><b>Security cookie.</b> If Cloudflare's security system sees unusual traffic, it may show a short check and set a security cookie called <code>cf_clearance</code>. It is used only to protect the site, never for ads or analytics.</li>
+<li><b>Downloads.</b> The app files are hosted on GitHub. GitHub may log technical details such as IP addresses to run and secure its service; see the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub General Privacy Statement</a>.</li>
+</ul>
+
+<h2>Changes and questions</h2>
+<p>If this policy changes, the new version is published here and its history is in the <a href="https://github.com/dpdev69/folio/commits/main/site/privacy.html">repository</a>. For questions or requests about your data, email <a href="mailto:support@hellobasalt.dev">support@hellobasalt.dev</a>.</p>
+</div>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/"><img src="/assets/icon-256.png" alt="" width="24" height="24" loading="lazy"><span>Folio</span></a>
+        <p>A desktop reading room for opencode: sessions as chapters, commands as footnotes, edits as plates. A Basalt app.</p>
+      </div>
+      <nav aria-labelledby="f-product">
+        <p class="f-title" id="f-product">Project</p>
+        <a href="/#download">Download</a>
+        <a href="https://github.com/dpdev69/folio">GitHub</a>
+        <a href="https://github.com/dpdev69/folio/releases">Releases</a>
+        <a href="https://github.com/dpdev69/folio/issues">Report a bug</a>
+      </nav>
+      <nav aria-labelledby="f-basalt">
+        <p class="f-title" id="f-basalt">More from Basalt</p>
+        <a href="https://hellobasalt.dev/">Basalt</a>
+        <a href="https://upright.hellobasalt.dev/">Upright, free mouse app</a>
+        <a href="https://lull.hellobasalt.dev/">Lull, coming soon</a>
+        <a href="https://gocmeden.hellobasalt.dev/">Göçmeden, remote jobs</a>
+        <a href="https://cosmicpost.lol/">Cosmic Post, space photo keepsakes</a>
+        <a href="https://kacpapel.app/">Kaç Papel?, price game</a>
+        <a href="https://github.com/dpdev69/claude-fight-hud">Fight HUD for Claude Code</a>
+        <a href="https://byewall.hellobasalt.dev/">ByeWall, find archived pages</a>
+        <a href="https://kahve.hellobasalt.dev/">KahveDrop, coffee finder</a>
+        <a href="https://outcrop.hellobasalt.dev/">Outcrop, SEO for software makers</a>
+        <a href="https://x.com/hellobasalt">X @hellobasalt</a>
+        <a href="https://www.youtube.com/@hellobasalt">YouTube @hellobasalt</a>
+      </nav>
+      <nav aria-labelledby="f-help">
+        <p class="f-title" id="f-help">Help</p>
+        <a href="mailto:support@hellobasalt.dev">support@hellobasalt.dev</a>
+        <a href="/#faq">FAQ</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </div>
+    <div class="footer-base">
+      <p>© 2026 Folio contributors · MIT license · A <a href="https://hellobasalt.dev/">Basalt</a> app</p>
+      <p>opencode is an open-source project by its own authors. Folio is an independent app and is not affiliated with or endorsed by them.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

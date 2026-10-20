@@ -12,6 +12,7 @@ import {
   loadBook,
   loadChosenModel,
   mapLimit,
+  NOT_SET_YET,
   NOT_TOLD,
   offeredModels,
   openChapter,
@@ -124,6 +125,13 @@ describe("revertPlate", () => {
     await expect(revertPlate(client, book([ch]), ch, plate({ turnMessageId: "msg_1378318cd0011en9zAGWcvx4bC" }))).rejects.toThrow(
       CANNOT_REVERT,
     );
+    expect(replay.requests.length).toBe(0);
+  });
+
+  it("asks for a moment when the plate's turn is not named yet", async () => {
+    const { replay, client } = await press();
+    const ch = chapter();
+    await expect(revertPlate(client, book([ch]), ch, plate({ turnMessageId: "local-1760918400000" }))).rejects.toThrow(NOT_SET_YET);
     expect(replay.requests.length).toBe(0);
   });
 });

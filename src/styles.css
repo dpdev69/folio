@@ -269,7 +269,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   font-weight: 500;
 }
 .line.ink { font-size: var(--ink-fs); height: auto; line-height: 1.25; white-space: normal; }
-.line.with-drop { display: flex; align-items: flex-start; gap: 8px; height: var(--lh); }
+/* The cap is taller than its line and hangs over the lines beside it, so this line shows its
+   overflow and clips only its own words. */
+.line.with-drop { display: flex; align-items: flex-start; gap: 8px; height: var(--lh); overflow: visible; }
+.line.with-drop .line-text { flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .drop {
   flex: none;
   width: var(--drop-w);
