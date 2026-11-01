@@ -28,7 +28,7 @@
 
 <link rel="icon" type="image/png" href="/assets/favicon.png">
 <link rel="apple-touch-icon" href="/assets/icon-256.png">
-<link rel="stylesheet" href="/assets/site.css?v=1">
+<link rel="stylesheet" href="/assets/site.css?v=2">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "Folio", "description": "A free, open-source desktop app for opencode that sets each coding-agent session as a chapter of a book: commands as footnotes, edits as plates you accept or reject.", "applicationCategory": "DeveloperApplication", "operatingSystem": "macOS 12 or later, Windows 10 or later, Linux", "softwareVersion": "0.3.0", "url": "https://folio.hellobasalt.dev/", "downloadUrl": "https://github.com/dpdev69/folio/releases/latest", "installUrl": "https://github.com/dpdev69/folio/releases/latest", "image": "https://folio.hellobasalt.dev/assets/og-image.png", "screenshot": "https://folio.hellobasalt.dev/assets/shot-plate.webp", "license": "https://opensource.org/licenses/MIT", "isAccessibleForFree": true, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "author": {"@type": "Organization", "name": "Folio contributors", "url": "https://github.com/dpdev69/folio"}, "publisher": {"@type": "Organization", "@id": "https://hellobasalt.dev/#org", "name": "Basalt Studio", "alternateName": "Basalt", "url": "https://hellobasalt.dev/", "sameAs": ["https://x.com/hellobasalt", "https://www.youtube.com/@hellobasalt"]}, "sameAs": ["https://github.com/dpdev69/folio"]}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebSite", "name": "Folio", "url": "https://folio.hellobasalt.dev/", "publisher": {"@id": "https://hellobasalt.dev/#org"}}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Is Folio free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Folio is open source under the MIT license. There is no account and nothing to buy. The free OpenCode Zen models need no key; other providers bill you directly if you paste their key."}}, {"@type": "Question", "name": "Do I need to install opencode first?", "acceptedAnswer": {"@type": "Answer", "text": "No. The installer carries opencode 2.0.32 and starts it for you on a random local port with a password made for that launch. You can also attach Folio to an opencode server you started yourself."}}, {"@type": "Question", "name": "Does Folio replace opencode?", "acceptedAnswer": {"@type": "Answer", "text": "No. opencode does the work. Folio is a different way to read and steer it: it talks to opencode's own HTTP API and does not fork or patch it."}}, {"@type": "Question", "name": "Will it touch my own opencode setup?", "acceptedAnswer": {"@type": "Answer", "text": "The bundled opencode keeps its sessions, keys and cache in Folio's own app data folder. It never opens your opencode database, and your opencode config folder stays yours."}}, {"@type": "Question", "name": "Does Folio send my code anywhere?", "acceptedAnswer": {"@type": "Answer", "text": "Folio itself sends nothing to Basalt. opencode sends your prompts and the files it reads to the model provider you choose, the same as it does in the terminal."}}, {"@type": "Question", "name": "macOS says it can't check Folio for malware. What do I do?", "acceptedAnswer": {"@type": "Answer", "text": "The build isn't signed with an Apple Developer ID yet. Open System Settings, then Privacy & Security, and click Open Anyway next to the message about Folio. If macOS says the app is damaged, run xattr -dr com.apple.quarantine /Applications/Folio.app in Terminal and open it again."}}]}</script>
@@ -85,7 +85,7 @@
       </div>
 
       <div class="hero-shot">
-        <figure class="frame"><img src="/assets/shot-plate.webp" alt="A Folio spread titled Chapter I, Add farewell function to src/greet.ts. The left page opens with a drop cap, then the request in blue handwriting, the reply in prose and eight footnotes for the files the agent read and the commands it ran. The right page shows Plate I, the diff for src/greet.ts, with Accept, Revise, Reject and Fold back under it." width="2200" height="1391" fetchpriority="high"></figure>
+        <figure class="frame"><picture><source media="(max-width: 600px)" srcset="/assets/shot-plate-phone.webp" width="874" height="1212"><img src="/assets/shot-plate.webp" alt="A Folio spread titled Chapter I, Add farewell function to src/greet.ts. The left page opens with a drop cap, then the request in blue handwriting, the reply in prose and eight footnotes for the files the agent read and the commands it ran. The right page shows Plate I, the diff for src/greet.ts, with Accept, Revise, Reject and Fold back under it." width="2200" height="1391" fetchpriority="high"></picture></figure>
         <p class="caption">A real session on opencode 2.0.32. opencode named the chapter from the request, and the edit it made faces the page as Plate I.</p>
       </div>
     </div>
@@ -125,7 +125,7 @@
             <li><b>Fold back</b> puts the plate away until you want it.</li>
           </ul>
         </div>
-        <figure class="frame"><img src="/assets/shot-plate-crop.webp" alt="Plate I, src/greet.ts, plus four lines: a new farewell function under greet, with Accept, Revise, Reject and Fold back underneath." width="1060" height="780" loading="lazy"></figure>
+        <figure class="frame"><picture><source media="(max-width: 600px)" srcset="/assets/shot-plate-crop-phone.webp" width="720" height="510"><img src="/assets/shot-plate-crop.webp" alt="Plate I, src/greet.ts, plus four lines: a new farewell function under greet, with Accept, Revise, Reject and Fold back underneath." width="1060" height="780" loading="lazy"></picture></figure>
       </article>
 
       <article class="feature flip">
@@ -134,7 +134,7 @@
           <p>Turn on <b>Ask before the press writes</b> in the menu and opencode stops before each edit and each shell command. The question sits at the foot of the page with the proposed change facing it.</p>
           <p>The answers are <b>Allow once</b> and <b>No</b>. There's deliberately no “Always”: in opencode that saves a rule for the whole project, and one click would quietly switch the setting off.</p>
         </div>
-        <figure class="frame"><img src="/assets/shot-ask.webp" alt="Chapter II paused before an edit: the request in ink on the left, May I edit src/greet.ts? Allow once · No at the foot of the page, and the proposed one-line comment set as Plate I on the right." width="1280" height="840" loading="lazy"></figure>
+        <figure class="frame"><picture><source media="(max-width: 600px)" srcset="/assets/shot-ask-phone.webp" width="460" height="305"><img src="/assets/shot-ask.webp" alt="Chapter II paused before an edit: the request in ink on the left, May I edit src/greet.ts? Allow once · No at the foot of the page, and the proposed one-line comment set as Plate I on the right." width="1280" height="840" loading="lazy"></picture></figure>
       </article>
 
       <article class="feature">
@@ -143,7 +143,7 @@
           <p>The installer carries opencode 2.0.32 and starts it for you on a random local port, with a password made for that launch. It keeps its own sessions and keys, so your opencode setup stays untouched.</p>
           <p>The free OpenCode Zen models work without a key. Paste a key for another provider if you have one, or attach Folio to an opencode server you already run.</p>
         </div>
-        <figure class="frame"><img src="/assets/shot-title.webp" alt="Folio's title page: The press is ready. Using opencode 2.0.32 with a free OpenCode Zen model. Open a folder, use a provider key, or read the sample." width="1600" height="1012" loading="lazy"></figure>
+        <figure class="frame"><picture><source media="(max-width: 600px)" srcset="/assets/shot-title-phone.webp" width="636" height="320"><img src="/assets/shot-title.webp" alt="Folio's title page: The press is ready. Using opencode 2.0.32 with a free OpenCode Zen model. Open a folder, use a provider key, or read the sample." width="1600" height="1012" loading="lazy"></picture></figure>
       </article>
 
       <article class="feature flip">
@@ -152,7 +152,7 @@
           <p>Original, Quiet, Paper, Bold, Calm and Focus each pair a typeface with a palette in both appearances. Text size, line spacing, margins and justified text are yours to set, and every theme keeps its ink readable on the page.</p>
           <p>Highlight a passage to write in the margin. The reply sits beside your note and can replace the passage.</p>
         </div>
-        <figure class="frame"><img src="/assets/shot-themes.webp" alt="A chapter in the dark appearance with the Calm theme, and the Themes and Settings menu open: text size, appearance, and six swatches, Original, Quiet, Paper, Bold, Calm and Focus." width="1600" height="1012" loading="lazy"></figure>
+        <figure class="frame"><picture><source media="(max-width: 600px)" srcset="/assets/shot-themes-phone.webp" width="750" height="560"><img src="/assets/shot-themes.webp" alt="A chapter in the dark appearance with the Calm theme, and the Themes and Settings menu open: text size, appearance, and six swatches, Original, Quiet, Paper, Bold, Calm and Focus." width="1600" height="1012" loading="lazy"></picture></figure>
       </article>
     </div>
   </section>

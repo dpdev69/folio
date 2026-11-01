@@ -39,7 +39,7 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+html { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body {
   margin: 0;
@@ -50,7 +50,6 @@ body {
 }
 img { max-width: 100%; height: auto; display: block; }
 a { color: var(--terra); text-underline-offset: 3px; }
-a:hover { color: var(--terra-deep); }
 :focus-visible { outline: 2px solid var(--terra); outline-offset: 3px; border-radius: 4px; }
 code { font-family: var(--mono); font-size: 0.82em; background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 0.1em 0.35em; border-radius: 4px; }
 .wrap { width: min(1120px, 100% - 32px); margin-inline: auto; }
@@ -62,25 +61,20 @@ code { font-family: var(--mono); font-size: 0.82em; background: color-mix(in srg
 .nav-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 64px; }
 .brand-lockup { display: flex; align-items: center; min-width: 0; }
 .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-size: 24px; font-weight: 500; letter-spacing: 0.01em; }
-.brand:hover { color: var(--ink); }
 .brand img { width: 28px; height: 28px; border-radius: 6px; }
 .by-basalt { font: 400 0.75rem/1 var(--mono); letter-spacing: 0.04em; color: var(--soft); text-decoration: none; margin-left: 10px; padding-top: 4px; white-space: nowrap; }
-.by-basalt:hover { color: var(--ink); text-decoration: underline; }
 .nav-links { display: flex; gap: 28px; font-size: 17px; }
 .nav-links a { color: var(--soft); text-decoration: none; }
-.nav-links a:hover { color: var(--ink); }
 .nav-end { display: flex; align-items: center; gap: 14px; }
 .nav-gh { display: inline-flex; align-items: center; gap: 6px; color: var(--soft); text-decoration: none; font-size: 17px; }
 .nav-gh svg { width: 18px; height: 18px; }
-.nav-gh:hover { color: var(--ink); }
 
 /* Buttons */
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; border-radius: 999px; text-decoration: none; font: 500 15px/1 var(--sans); padding: 12px 20px; border: 1px solid transparent; transition: background-color .15s, color .15s, border-color .15s; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; border-radius: 999px; text-decoration: none; font: 500 15px/1 var(--sans); padding: 12px 20px; border: 1px solid transparent; transition: background-color .15s, color .15s, border-color .15s, transform .16s cubic-bezier(.23, 1, .32, 1); }
+.btn:active { transform: scale(.97); }
 .btn svg { width: 18px; height: 18px; }
 .btn-primary { background: var(--ink); color: var(--page); }
-.btn-primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--terra)); color: var(--page); }
 .btn-secondary { background: transparent; color: var(--ink); border-color: var(--rule); }
-.btn-secondary:hover { color: var(--ink); border-color: var(--soft); }
 .btn-sm { padding: 9px 15px; font-size: 14px; }
 .btn-lg { padding: 15px 26px; font-size: 16px; }
 
@@ -170,6 +164,7 @@ code { font-family: var(--mono); font-size: 0.82em; background: color-mix(in srg
 .doc p, .doc li { color: var(--soft); }
 .doc li { margin-bottom: 8px; }
 .doc b { color: var(--ink); font-weight: 500; }
+.doc code { overflow-wrap: anywhere; }
 .doc .lede-doc { font-size: 22px; color: var(--ink); }
 
 /* Basalt product footer (basalt/footer), mapped to Folio's tokens. */
@@ -182,7 +177,6 @@ code { font-family: var(--mono); font-size: 0.82em; background: color-mix(in srg
 .footer-brand p { color: var(--ink-3); margin: 10px 0 0; max-width: 26em; }
 .footer nav { display: grid; gap: 8px; align-content: start; }
 .footer nav a { color: var(--ink-2); text-decoration: none; }
-.footer nav a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .f-title { font-weight: 600; color: var(--ink); margin: 0 0 4px; }
 .footer-base { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--rule); display: grid; gap: 8px; color: var(--ink-3); font-size: 12.5px; }
 .footer-base p { margin: 0; }
@@ -212,3 +206,28 @@ code { font-family: var(--mono); font-size: 0.82em; background: color-mix(in srg
 .section-head .eyebrow { color: var(--terra); font-size: 13px; margin: 0 0 14px; }
 .trust a { white-space: nowrap; }
 .doc .eyebrow { color: var(--terra); }
+
+/* Phone baseline: hover only where a mouse can hover, so a tapped link
+   doesn't keep its hover colour. */
+@media (hover: hover) and (pointer: fine) {
+  a:hover { color: var(--terra-deep); }
+  .brand:hover { color: var(--ink); }
+  .by-basalt:hover { color: var(--ink); text-decoration: underline; }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-gh:hover { color: var(--ink); }
+  .btn-primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--terra)); color: var(--page); }
+  .btn-secondary:hover { color: var(--ink); border-color: var(--soft); }
+  .footer nav a:hover { text-decoration: underline; text-underline-offset: 3px; }
+}
+/* Touch: 44 px hit areas without changing the look. */
+@media (pointer: coarse) {
+  .nav-gh { min-height: 44px; min-width: 44px; justify-content: center; }
+  .brand { min-height: 44px; }
+  .nav-end .btn-sm { position: relative; }
+  .nav-end .btn-sm::after { content: ""; position: absolute; inset: -6px -4px; }
+  .by-basalt { padding-block: 14px 10px; }
+  .footer nav { gap: 0; }
+  .footer nav a { padding-block: 10px; }
+  .footer-base a, .trust a, .catch a { display: inline-block; padding-block: 10px; margin-block: -10px; }
+}
+.frame picture { display: block; }
